@@ -4,22 +4,22 @@
 # SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
 #
 
-menu "Cellfund Lesson 6 Exercise"
+menu "Cellfund Lesson 5 Exercise"
 
-config GNSS_PERIODIC_INTERVAL
-	int "Fix interval for periodic GPS fixes"
-	range 10 65535
-	default 120
-	help
-	  Fix interval (in seconds) for periodic fixes.
+config COAP_SERVER_IP
+	string "CoAP server ip address"
 
-config GNSS_PERIODIC_TIMEOUT
-	int "Fix timeout for periodic GPS fixes"
-	range 0 65535
-	default 480
-	help
-	  Fix timeout (in seconds) for periodic fixes.
-	  If set to zero, GNSS is allowed to run indefinitely until a valid PVT estimate is produced.
+config COAP_SERVER_PORT
+	int "CoAP server port"
+	default 5683
+
+config COAP_TX_RESOURCE
+	string "CoAP resource - this is the TX channel of the board"
+	default "large-update"
+
+config COAP_RX_RESOURCE
+	string "CoAP resource - this is the RX channel of the board"
+	default "validate"
 
 endmenu
 
