@@ -372,6 +372,87 @@ static int client_handle_response(uint8_t *buf, int received)
 	return 0;
 }
 
+static void gnss_event_handler(int event)
+{
+	int err, num_satellites;
+
+	switch (event) {
+	case NRF_MODEM_GNSS_EVT_PVT:
+		num_satellites = 0;
+		for (int i = 0; i < 12 ; i++) {
+			if (pvt_data.sv[i].signal != 0) {
+				num_satellites++;
+			}
+		}
+		LOG_INF("Searching. Current satellites: %d", num_satellites);
+		err = nrf_modem_gnss_read(&pvt_data, sizeof(pvt_data), NRF_MODEM_GNSS_DATA_PVT);
+		if (err) {
+			LOG_ERR("nrf_modem_gnss_read failed, err %d", err);
+			return;
+		}
+		if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID) {
+			dk_set_led_on(DK_LED1);
+			print_fix_data(&pvt_data);
+			if (!first_fix) {
+				LOG_INF("Time to first fix: %2.1lld s", (k_uptime_get() - gnss_start_time)/1000);
+				first_fix = true;
+			}
+			return;
+		}
+		/* STEP 5 - Check for the flags indicating GNSS is blocked */
+		if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_DEADLINE_MISSED) {
+			LOG_INF("GNSS blocked by LTE activity");
+		} else if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_NOT_ENOUGH_WINDOW_TIME) {
+			LOG_INF("Insufficient GNSS time windows");
+		}
+		break;
+
+	case NRF_MODEM_GNSS_EVT_PERIODIC_WAKEUP:
+		LOG_INF("GNSS has woken up");
+		break;
+	case NRF_MODEM_GNSS_EVT_SLEEP_AFTER_FIX:
+		LOG_INF("GNSS enter sleep after fix");
+		break;
+	default:
+		break;
+	}
+}
+
+static int gnss_init_and_start(void)
+{
+
+	/* STEP 4 - Set the modem mode to normal */
+	if (lte_lc_func_mode_set(LTE_LC_FUNC_MODE_NORMAL) != 0) {
+		LOG_ERR("Failed to activate GNSS functional mode");
+		return -1;
+	}
+
+	if (nrf_modem_gnss_event_handler_set(gnss_event_handler) != 0) {
+		LOG_ERR("Failed to set GNSS event handler");
+		return -1;
+	}
+
+	if (nrf_modem_gnss_fix_interval_set(CONFIG_GNSS_PERIODIC_INTERVAL) != 0) {
+		LOG_ERR("Failed to set GNSS fix interval");
+		return -1;
+	}
+
+	if (nrf_modem_gnss_fix_retry_set(CONFIG_GNSS_PERIODIC_TIMEOUT) != 0) {
+		LOG_ERR("Failed to set GNSS fix retry");
+		return -1;
+	}
+
+	LOG_INF("Starting GNSS");
+	if (nrf_modem_gnss_start() != 0) {
+		LOG_ERR("Failed to start GNSS");
+		return -1;
+	}
+
+	gnss_start_time = k_uptime_get();
+
+	return 0;
+}
+
 static void button_handler(uint32_t button_state, uint32_t has_changed)
 {
 	/* STEP 10 - Send a GET request or PUT request upon button triggers */
