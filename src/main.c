@@ -23,6 +23,38 @@
 // #define MESSAGE_TO_SEND '{"time": "2021-05-01 13:00:00", "latitude": 65.345, "longitude": 28.890, "altitude": 123.456, "accuracy": 12.345}'
 #define MESSAGE_TO_SEND "Hello from thingy91!"
 
+/* Application module super states. */
+static enum state_type {
+	STATE_INIT,
+	STATE_RUNNING,
+	STATE_SHUTDOWN
+} state;
+
+/* Application sub states. The application can be in either active or passive
+ * mode.
+ *
+ * Active mode: Sensor GNSS position is acquired at a configured
+ *		interval and sent to cloud.
+ *
+ * Passive mode: Sensor GNSS position is acquired when movement is
+ *		 detected, or after the configured movement timeout occurs.
+ */
+static enum sub_state_type {
+	SUB_STATE_ACTIVE_MODE,
+	SUB_STATE_PASSIVE_MODE,
+} sub_state;
+
+struct {
+	/**Device mode: Active or Passive*/
+	bool active_mode;
+	/**Location search timeout*/
+	int location_timeout;
+	/**Delay between location search in active mode*/
+	int active_wait_timeout;
+	/**Delay between location search in passive mode*/
+	int passive_wait_timeout;
+} app_cfg;
+
 /* STEP 4.2 - Define the macros for the CoAP version and message length */
 #define APP_COAP_VERSION 1
 #define APP_COAP_MAX_MSG_LEN 1280
@@ -38,7 +70,55 @@ static struct sockaddr_storage server;
 
 K_SEM_DEFINE(lte_connected, 0, 1);
 
-LOG_MODULE_REGISTER(Lesson5_Exercise1, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(Lesson6_Exercise2, LOG_LEVEL_INF);
+
+string sub_state_to_string(enum sub_state_type sub_state)
+{
+	switch (sub_state)
+	{
+	case SUB_STATE_ACTIVE_MODE:
+		return "SUB_STATE_ACTIVE_MODE";
+	case SUB_STATE_PASSIVE_MODE:
+		return "SUB_STATE_PASSIVE_MODE";
+	default:
+		return "Unknown"
+	}
+}
+
+string state_to_string(enum state_type state)
+{
+	switch (state)
+	{
+	case STATE_INIT:
+		return "STATE_INIT";
+	case STATE_RUNNING:
+		return "STATE_RUNNING";
+	case STATE_SHUTDOWN:
+		return "STATE_SHUTDOWN";
+	default:
+		return "Unknown"
+	}
+}
+
+static void set_state(enum state_type new_state)
+{
+	if new_state = state{
+		LOG_DBG("State: %s", state_to_string(state))
+	}
+	LOG_DBG("State transition: %s -> %s", 
+		state_to_string(state),
+		state_to_string(new_state))
+}
+
+static void set_sub_state(enum sub_state_type new_sub_state)
+{
+	if new_sub_state = sub_state{
+		LOG_DBG("Sub state: %s", state_to_string(sub_state))
+	}
+	LOG_DBG("Sub state transition: %s -> %s", 
+		sub_state_to_string(sub_state),
+		sub_state_to_string(new_sub_state))
+}
 
 static int server_resolve(void)
 {
@@ -292,6 +372,34 @@ static void button_handler(uint32_t button_state, uint32_t has_changed)
 	#endif
 }
 
+static void on_state_init()
+{
+	set_state(STATE_RUNNING);
+	if (app_cfg.active_mode)
+	{
+		set_sub_state(SUB_STATE_ACTIVE_MODE);
+	}
+	else
+	{
+		set_sub_state(SUB_STATE_PASSIVE_MODE);
+	}
+}
+
+static void on_state_running()
+{
+	
+}
+
+static void on_sub_state_active()
+{
+	
+}
+
+static void on_sub_state_passive()
+{
+	
+}
+
 int main(void)
 {
 	int err;
@@ -322,7 +430,33 @@ int main(void)
 	}
 
 	while (1) {
-		/* STEP 11 - Receive response from the CoAP server */
+
+		switch (state)
+		{
+		case STATE_INIT:
+			on_state_init();
+			break;
+		case STATE_RUNNING:
+			switch (sub_state)
+			{
+			case SUB_STATE_ACTIVE_MODE:
+				on_sub_state_active();
+				break;
+			case SUB_STATE_PASSIVE_MODE:
+				on_sub_state_passive();
+				break;
+			default:
+				break;
+			on_state_running();
+			}
+			break;
+		case STATE_SHUTDOWN:
+			break;
+		
+		default:
+			LOG_ERR("Unknown state");
+			break;
+		}
 		received = recv(sock, coap_buf, sizeof(coap_buf), 0);
 
 		if (received < 0) {
