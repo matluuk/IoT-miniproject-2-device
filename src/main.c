@@ -20,7 +20,8 @@
 #include <zephyr/net/coap.h>
 
 /* STEP 4.1 - Define the macro for the message from the board */
-#define MESSAGE_TO_SEND "Hello from nRF9160 SiP"
+// #define MESSAGE_TO_SEND '{"time": "2021-05-01 13:00:00", "latitude": 65.345, "longitude": 28.890, "altitude": 123.456, "accuracy": 12.345}'
+#define MESSAGE_TO_SEND "Hello from thingy91!"
 
 /* STEP 4.2 - Define the macros for the CoAP version and message length */
 #define APP_COAP_VERSION 1
@@ -168,8 +169,8 @@ static int client_get_send(void)
 	return 0;
 }
 
-/**@biref Send CoAP PUT request. */
-static int client_put_send(void)
+/**@biref Send CoAP POST request. */
+static int client_post_send(void)
 {
 	int err;
 	struct coap_packet request;
@@ -178,9 +179,9 @@ static int client_put_send(void)
 
 	/* STEP 8.1 - Initialize the CoAP packet and append the resource path */
 	err = coap_packet_init(&request, coap_buf, sizeof(coap_buf),
-			       APP_COAP_VERSION, COAP_TYPE_NON_CON,
-			       sizeof(next_token), (uint8_t *)&next_token,
-			       COAP_METHOD_PUT, coap_next_id());
+				   APP_COAP_VERSION, COAP_TYPE_NON_CON,
+				   sizeof(next_token), (uint8_t *)&next_token,
+				   COAP_METHOD_POST, coap_next_id());
 	if (err < 0) {
 		LOG_ERR("Failed to create CoAP request, %d\n", err);
 		return err;
@@ -223,7 +224,7 @@ static int client_put_send(void)
 		return -errno;
 	}
 
-	LOG_INF("CoAP PUT request sent: Token 0x%04x\n", next_token);
+	LOG_INF("CoAP POST request sent: Token 0x%04x\n", next_token);
 
 	return 0;
 }
@@ -276,7 +277,7 @@ static void button_handler(uint32_t button_state, uint32_t has_changed)
 	if (has_changed & DK_BTN1_MSK && button_state & DK_BTN1_MSK) {
 		client_get_send();
 	} else if (has_changed & DK_BTN2_MSK && button_state & DK_BTN2_MSK) {
-		client_put_send();
+		client_post_send();
 	}
 	#elif defined (CONFIG_BOARD_THINGY91_NRF9160_NS)
 	static bool toogle = 1;
@@ -284,7 +285,7 @@ static void button_handler(uint32_t button_state, uint32_t has_changed)
 		if (toogle == 1) {
 			client_get_send();
 		} else {
-			client_put_send();
+			client_post_send();
 		}
 		toogle = !toogle;
 	}
