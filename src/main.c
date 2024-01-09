@@ -372,6 +372,24 @@ static int client_handle_response(uint8_t *buf, int received)
 	return 0;
 }
 
+static void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
+{
+	LOG_INF("Latitude:       %.06f", pvt_data->latitude);
+	LOG_INF("Longitude:      %.06f", pvt_data->longitude);
+	LOG_INF("Altitude:       %.01f m", pvt_data->altitude);
+	LOG_INF("Time (UTC):     %02u:%02u:%02u.%03u",
+	       pvt_data->datetime.hour,
+	       pvt_data->datetime.minute,
+	       pvt_data->datetime.seconds,
+	       pvt_data->datetime.ms);
+
+	/* STEP 3.2 - Store latitude and longitude in gps_data buffer */
+	int err = snprintf(gps_data, MESSAGE_SIZE, "Latitude: %.06f, Longitude: %.06f", pvt_data->latitude, pvt_data->longitude);
+	if (err < 0) {
+		LOG_ERR("Failed to print to buffer: %d", err);
+	}
+}
+
 static void gnss_event_handler(int event)
 {
 	int err, num_satellites;
