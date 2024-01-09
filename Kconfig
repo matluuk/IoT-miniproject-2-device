@@ -4,7 +4,14 @@
 # SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
 #
 
-menu "Cellfund Lesson 5 Exercise"
+menu "Iot-miniproject-2"
+
+config GNSS_PERIODIC_INTERVAL
+	int "Fix interval for periodic GPS fixes"
+	range 10 65535
+	default 120
+	help
+	  Fix interval (in seconds) for periodic fixes.
 
 config COAP_SERVER_IP
 	string "CoAP server ip address"
