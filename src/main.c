@@ -1,9 +1,3 @@
-/*
- * Copyright (c) 2019 Nordic Semiconductor ASA
- *
- * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
- */
-
 #include <stdio.h>
 
 #include <zephyr/kernel.h>
@@ -14,13 +8,11 @@
 #include <dk_buttons_and_leds.h>
 #include <modem/nrf_modem_lib.h>
 #include <modem/lte_lc.h>
+#include <nrf_modem_gnss.h>
 
-
-/* STEP 2.2 - Include the header file for the CoAP library */
+/* Include the header file for the CoAP library */
 #include <zephyr/net/coap.h>
 
-/* STEP 4.1 - Define the macro for the message from the board */
-// #define MESSAGE_TO_SEND '{"time": "2021-05-01 13:00:00", "latitude": 65.345, "longitude": 28.890, "altitude": 123.456, "accuracy": 12.345}'
 #define MESSAGE_TO_SEND "Hello from thingy91!"
 
 /* Application module super states. */
@@ -55,6 +47,11 @@ struct {
 	int passive_wait_timeout;
 } app_cfg;
 
+static struct nrf_modem_gnss_pvt_data_frame pvt_data;
+
+static int64_t gnss_start_time;
+static bool first_fix = false;
+
 /* STEP 4.2 - Define the macros for the CoAP version and message length */
 #define APP_COAP_VERSION 1
 #define APP_COAP_MAX_MSG_LEN 1280
@@ -68,7 +65,7 @@ static uint16_t next_token;
 static int sock;
 static struct sockaddr_storage server;
 
-K_SEM_DEFINE(lte_connected, 0, 1);
+static K_SEM_DEFINE(lte_connected, 0, 1);
 
 LOG_MODULE_REGISTER(Lesson6_Exercise2, LOG_LEVEL_INF);
 
@@ -81,7 +78,7 @@ string sub_state_to_string(enum sub_state_type sub_state)
 	case SUB_STATE_PASSIVE_MODE:
 		return "SUB_STATE_PASSIVE_MODE";
 	default:
-		return "Unknown"
+		return "Unknown";
 	}
 }
 
@@ -96,7 +93,7 @@ string state_to_string(enum state_type state)
 	case STATE_SHUTDOWN:
 		return "STATE_SHUTDOWN";
 	default:
-		return "Unknown"
+		return "Unknown";
 	}
 }
 
@@ -164,24 +161,38 @@ static int client_init(void)
 
 static void lte_handler(const struct lte_lc_evt *const evt)
 {
-     switch (evt->type) {
-     case LTE_LC_EVT_NW_REG_STATUS:
-        if ((evt->nw_reg_status != LTE_LC_NW_REG_REGISTERED_HOME) &&
-            (evt->nw_reg_status != LTE_LC_NW_REG_REGISTERED_ROAMING)) {
-            break;
-        }
+	switch (evt->type) {
+	case LTE_LC_EVT_NW_REG_STATUS:
+		if ((evt->nw_reg_status != LTE_LC_NW_REG_REGISTERED_HOME) &&
+			(evt->nw_reg_status != LTE_LC_NW_REG_REGISTERED_ROAMING)) {
+			break;
+		}
 		LOG_INF("Network registration status: %s",
 				evt->nw_reg_status == LTE_LC_NW_REG_REGISTERED_HOME ?
 				"Connected - home network" : "Connected - roaming");
 		k_sem_give(&lte_connected);
-        break;
+		break;
 	case LTE_LC_EVT_RRC_UPDATE:
-		LOG_INF("RRC mode: %s", evt->rrc_mode == LTE_LC_RRC_MODE_CONNECTED ?
+		LOG_INF("RRC mode: %s",
+				evt->rrc_mode == LTE_LC_RRC_MODE_CONNECTED ?
 				"Connected" : "Idle");
 		break;
-     default:
-             break;
-     }
+	/* STEP 9.1 - On event PSM update, print PSM paramters and check if was enabled */
+	case LTE_LC_EVT_PSM_UPDATE:
+		LOG_INF("PSM parameter update: Periodic TAU: %d s, Active time: %d s",
+			evt->psm_cfg.tau, evt->psm_cfg.active_time);
+		if (evt->psm_cfg.active_time == -1){
+			LOG_ERR("Network rejected PSM parameters. Failed to enable PSM");
+		}
+		break;
+	/* STEP 9.2 - On event eDRX update, print eDRX paramters */
+	case LTE_LC_EVT_EDRX_UPDATE:
+		LOG_INF("eDRX parameter update: eDRX: %f, PTW: %f",
+			evt->edrx_cfg.edrx, evt->edrx_cfg.ptw);
+		break;
+	default:
+		break;
+	}
 }
 
 static int modem_configure(void)
@@ -196,11 +207,22 @@ static int modem_configure(void)
 		return err;
 	}
 
+	/* STEP 8 - Request PSM and eDRX from the network */
+	err = lte_lc_psm_req(true);
+	if (err) {
+		LOG_ERR("lte_lc_psm_req, error: %d", err);
+	}
+
+	err = lte_lc_edrx_req(true);
+	if (err) {
+		LOG_ERR("lte_lc_edrx_req, error: %d", err);
+	}
+
 	LOG_INF("Connecting to LTE network");
 
 	err = lte_lc_init_and_connect_async(lte_handler);
 	if (err) {
-		LOG_INF("Modem could not be configured, error: %d", err);
+		LOG_ERR("Modem could not be configured, error: %d", err);
 		return err;
 	}
 
@@ -214,7 +236,7 @@ static int modem_configure(void)
 /**@biref Send CoAP GET request. */
 static int client_get_send(void)
 {
-	/* STEP 7.1 - Create the CoAP message*/
+	/* Create the CoAP message*/
 	struct coap_packet request;
 
 	next_token++;
@@ -228,7 +250,7 @@ static int client_get_send(void)
 		return err;
 	}
 
-	/* STEP 7.2 - Add an option specifying the resource path */
+	/* Add an option specifying the resource path */
 	err = coap_packet_append_option(&request, COAP_OPTION_URI_PATH,
 					(uint8_t *)CONFIG_COAP_RX_RESOURCE,
 					strlen(CONFIG_COAP_RX_RESOURCE));
@@ -237,7 +259,7 @@ static int client_get_send(void)
 		return err;
 	}
 
-	/* STEP 7.3 - Send the configured CoAP packet */
+	/* Send the configured CoAP packet */
 	err = send(sock, request.data, request.offset, 0);
 	if (err < 0) {
 		LOG_ERR("Failed to send CoAP request, %d\n", errno);
@@ -257,7 +279,7 @@ static int client_post_send(void)
 
 	next_token++;
 
-	/* STEP 8.1 - Initialize the CoAP packet and append the resource path */
+	/* Initialize the CoAP packet and append the resource path */
 	err = coap_packet_init(&request, coap_buf, sizeof(coap_buf),
 				   APP_COAP_VERSION, COAP_TYPE_NON_CON,
 				   sizeof(next_token), (uint8_t *)&next_token,
@@ -275,7 +297,7 @@ static int client_post_send(void)
 		return err;
 	}
 
-	/* STEP 8.2 - Append the content format as plain text */
+	/* Append the content format as plain text */
 	const uint8_t text_plain = COAP_CONTENT_FORMAT_TEXT_PLAIN;
 	err = coap_packet_append_option(&request, COAP_OPTION_CONTENT_FORMAT,
 					&text_plain,
@@ -285,7 +307,7 @@ static int client_post_send(void)
 		return err;
 	}
 
-	/* STEP 8.3 - Add the payload to the message */
+	/* Add the payload to the message */
 	err = coap_packet_append_payload_marker(&request);
 	if (err < 0) {
 		LOG_ERR("Failed to append payload marker, %d\n", err);
