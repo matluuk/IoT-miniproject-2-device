@@ -13,6 +13,14 @@ config GNSS_PERIODIC_INTERVAL
 	help
 	  Fix interval (in seconds) for periodic fixes.
 
+config GNSS_PERIODIC_TIMEOUT
+	int "Fix timeout for periodic GPS fixes"
+	range 0 65535
+	default 480
+	help
+	  Fix timeout (in seconds) for periodic fixes.
+	  If set to zero, GNSS is allowed to run indefinitely until a valid PVT estimate is produced.
+
 config COAP_SERVER_IP
 	string "CoAP server ip address"
 
