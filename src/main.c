@@ -69,7 +69,7 @@ static K_SEM_DEFINE(lte_connected, 0, 1);
 
 LOG_MODULE_REGISTER(Lesson6_Exercise2, LOG_LEVEL_INF);
 
-string sub_state_to_string(enum sub_state_type sub_state)
+static char *sub_state_to_string(enum sub_state_type sub_state)
 {
 	switch (sub_state)
 	{
@@ -82,7 +82,7 @@ string sub_state_to_string(enum sub_state_type sub_state)
 	}
 }
 
-string state_to_string(enum state_type state)
+static char *state_to_string(enum state_type state)
 {
 	switch (state)
 	{
@@ -99,22 +99,26 @@ string state_to_string(enum state_type state)
 
 static void set_state(enum state_type new_state)
 {
-	if new_state = state{
-		LOG_DBG("State: %s", state_to_string(state))
+	if (new_state == state) {
+		LOG_DBG("State: %s", state_to_string(state));
+		return;
 	}
 	LOG_DBG("State transition: %s -> %s", 
 		state_to_string(state),
-		state_to_string(new_state))
+		state_to_string(new_state));
+	state = new_state;
 }
 
 static void set_sub_state(enum sub_state_type new_sub_state)
 {
-	if new_sub_state = sub_state{
-		LOG_DBG("Sub state: %s", state_to_string(sub_state))
+	if (new_sub_state == sub_state) {
+		LOG_DBG("Sub state: %s", state_to_string(sub_state));
+		return;
 	}
 	LOG_DBG("Sub state transition: %s -> %s", 
 		sub_state_to_string(sub_state),
-		sub_state_to_string(new_sub_state))
+		sub_state_to_string(new_sub_state));
+	sub_state = new_sub_state;
 }
 
 static int server_resolve(void)
@@ -233,46 +237,8 @@ static int modem_configure(void)
 	return 0;
 }
 
-/**@biref Send CoAP GET request. */
-static int client_get_send(void)
-{
-	/* Create the CoAP message*/
-	struct coap_packet request;
-
-	next_token++;
-
-	int err = coap_packet_init(&request, coap_buf, sizeof(coap_buf),
-			       APP_COAP_VERSION, COAP_TYPE_NON_CON,
-			       sizeof(next_token), (uint8_t *)&next_token,
-			       COAP_METHOD_GET, coap_next_id());
-	if (err < 0) {
-		LOG_ERR("Failed to create CoAP request, %d\n", err);
-		return err;
-	}
-
-	/* Add an option specifying the resource path */
-	err = coap_packet_append_option(&request, COAP_OPTION_URI_PATH,
-					(uint8_t *)CONFIG_COAP_RX_RESOURCE,
-					strlen(CONFIG_COAP_RX_RESOURCE));
-	if (err < 0) {
-		LOG_ERR("Failed to encode CoAP option, %d\n", err);
-		return err;
-	}
-
-	/* Send the configured CoAP packet */
-	err = send(sock, request.data, request.offset, 0);
-	if (err < 0) {
-		LOG_ERR("Failed to send CoAP request, %d\n", errno);
-		return -errno;
-	}
-
-	LOG_INF("CoAP GET request sent: Token 0x%04x\n", next_token);
-
-	return 0;
-}
-
-/**@biref Send CoAP POST request. */
-static int client_post_send(void)
+/**@biref Send CoAP request. */
+static int client_send_request(const char *resource_path, uint8_t content_type, const char *payload, uint8_t method)
 {
 	int err;
 	struct coap_packet request;
@@ -283,41 +249,42 @@ static int client_post_send(void)
 	err = coap_packet_init(&request, coap_buf, sizeof(coap_buf),
 				   APP_COAP_VERSION, COAP_TYPE_NON_CON,
 				   sizeof(next_token), (uint8_t *)&next_token,
-				   COAP_METHOD_POST, coap_next_id());
+				   method, coap_next_id());
 	if (err < 0) {
 		LOG_ERR("Failed to create CoAP request, %d\n", err);
 		return err;
 	}
 
 	err = coap_packet_append_option(&request, COAP_OPTION_URI_PATH,
-					(uint8_t *)CONFIG_COAP_TX_RESOURCE,
-					strlen(CONFIG_COAP_TX_RESOURCE));
+					(uint8_t *)resource_path,
+					strlen(resource_path));
 	if (err < 0) {
 		LOG_ERR("Failed to encode CoAP option, %d\n", err);
 		return err;
 	}
 
-	/* Append the content format as plain text */
-	const uint8_t text_plain = COAP_CONTENT_FORMAT_TEXT_PLAIN;
+	/* Append the content format */
 	err = coap_packet_append_option(&request, COAP_OPTION_CONTENT_FORMAT,
-					&text_plain,
-					sizeof(text_plain));
+					&content_type,
+					sizeof(content_type));
 	if (err < 0) {
 		LOG_ERR("Failed to encode CoAP option, %d\n", err);
 		return err;
 	}
 
 	/* Add the payload to the message */
-	err = coap_packet_append_payload_marker(&request);
-	if (err < 0) {
-		LOG_ERR("Failed to append payload marker, %d\n", err);
-		return err;
-	}
+	if (payload != NULL) {
+		err = coap_packet_append_payload_marker(&request);
+		if (err < 0) {
+			LOG_ERR("Failed to append payload marker, %d\n", err);
+			return err;
+		}
 
-	err = coap_packet_append_payload(&request, (uint8_t *)MESSAGE_TO_SEND, sizeof(MESSAGE_TO_SEND));
-	if (err < 0) {
-		LOG_ERR("Failed to append payload, %d\n", err);
-		return err;
+		err = coap_packet_append_payload(&request, (uint8_t *)payload, strlen(payload));
+		if (err < 0) {
+			LOG_ERR("Failed to append payload, %d\n", err);
+			return err;
+		}
 	}
 
 	err = send(sock, request.data, request.offset, 0);
@@ -326,7 +293,7 @@ static int client_post_send(void)
 		return -errno;
 	}
 
-	LOG_INF("CoAP POST request sent: Token 0x%04x\n", next_token);
+	LOG_INF("CoAP request sent: Token 0x%04x\n", next_token);
 
 	return 0;
 }
@@ -382,12 +349,6 @@ static void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
 	       pvt_data->datetime.minute,
 	       pvt_data->datetime.seconds,
 	       pvt_data->datetime.ms);
-
-	/* STEP 3.2 - Store latitude and longitude in gps_data buffer */
-	int err = snprintf(gps_data, MESSAGE_SIZE, "Latitude: %.06f, Longitude: %.06f", pvt_data->latitude, pvt_data->longitude);
-	if (err < 0) {
-		LOG_ERR("Failed to print to buffer: %d", err);
-	}
 }
 
 static void gnss_event_handler(int event)
@@ -473,24 +434,16 @@ static int gnss_init_and_start(void)
 
 static void button_handler(uint32_t button_state, uint32_t has_changed)
 {
-	/* STEP 10 - Send a GET request or PUT request upon button triggers */
-	#if defined (CONFIG_BOARD_NRF9160DK_NRF9160_NS)
-	if (has_changed & DK_BTN1_MSK && button_state & DK_BTN1_MSK) {
-		client_get_send();
-	} else if (has_changed & DK_BTN2_MSK && button_state & DK_BTN2_MSK) {
-		client_post_send();
-	}
-	#elif defined (CONFIG_BOARD_THINGY91_NRF9160_NS)
+	/*Send a GET request or PUT request upon button triggers */
 	static bool toogle = 1;
 	if (has_changed & DK_BTN1_MSK && button_state & DK_BTN1_MSK) {
 		if (toogle == 1) {
-			client_get_send();
+			client_send_request(CONFIG_COAP_RX_RESOURCE, COAP_CONTENT_FORMAT_TEXT_PLAIN, NULL, COAP_METHOD_GET);
 		} else {
-			client_post_send();
+			client_send_request(CONFIG_COAP_TX_RESOURCE, COAP_CONTENT_FORMAT_TEXT_PLAIN, MESSAGE_TO_SEND, COAP_METHOD_POST);
 		}
 		toogle = !toogle;
 	}
-	#endif
 }
 
 static void on_state_init()
@@ -547,6 +500,11 @@ int main(void)
 
 	if (client_init() != 0) {
 		LOG_INF("Failed to initialize client");
+		return 0;
+	}
+
+	if (gnss_init_and_start() != 0) {
+		LOG_ERR("Failed to initialize and start GNSS");
 		return 0;
 	}
 
