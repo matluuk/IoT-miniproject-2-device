@@ -36,6 +36,10 @@ config COAP_RX_RESOURCE
 	string "CoAP resource - this is the RX channel of the board"
 	default "validate"
 
+config CJSON
+	bool "Enable cJSON"
+	default n
+
 endmenu
 
 menu "Zephyr Kernel"

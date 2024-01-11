@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <time.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/net/socket.h>
@@ -9,6 +10,8 @@
 #include <modem/nrf_modem_lib.h>
 #include <modem/lte_lc.h>
 #include <nrf_modem_gnss.h>
+
+#include "cJSON.h"
 
 /* Include the header file for the CoAP library */
 #include <zephyr/net/coap.h>
@@ -238,7 +241,7 @@ static int modem_configure(void)
 }
 
 /**@biref Send CoAP request. */
-static int client_send_request(const char *resource_path, uint8_t content_type, const char *payload, uint8_t method)
+static int client_send_request(const char *resource_path, uint8_t content_type, const char *payload, uint8_t method, enum coap_msgtype type)
 {
 	int err;
 	struct coap_packet request;
@@ -247,7 +250,7 @@ static int client_send_request(const char *resource_path, uint8_t content_type, 
 
 	/* Initialize the CoAP packet and append the resource path */
 	err = coap_packet_init(&request, coap_buf, sizeof(coap_buf),
-				   APP_COAP_VERSION, COAP_TYPE_NON_CON,
+				   APP_COAP_VERSION, type,
 				   sizeof(next_token), (uint8_t *)&next_token,
 				   method, coap_next_id());
 	if (err < 0) {
@@ -298,6 +301,56 @@ static int client_send_request(const char *resource_path, uint8_t content_type, 
 	return 0;
 }
 
+static int client_send_post_request()
+{
+	time_t t = time(NULL);
+			struct tm *tm_info = localtime(&t);
+
+			char time_str[20];
+			strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+
+			cJSON *root = cJSON_CreateObject();
+			if (root == NULL) {
+				printf("Error: cJSON_CreateObject failed\n");
+				return;
+			}
+
+			if (!cJSON_AddStringToObject(root, "time", time_str)) {
+				LOG_ERR("Error: cJSON_AddStringToObject failed for time\n");
+				cJSON_Delete(root);
+				return;
+			}
+
+			if (!cJSON_AddNumberToObject(root, "latitude", 67.111)) {
+				LOG_ERR("Error: cJSON_AddNumberToObject failed for latitude\n");
+				cJSON_Delete(root);
+				return;
+			}
+
+			if (!cJSON_AddNumberToObject(root, "longitude", 27.111)) {
+				LOG_ERR("Error: cJSON_AddNumberToObject failed for longitude\n");
+				cJSON_Delete(root);
+				return;
+			}
+			LOG_INF("Sending: %s", cJSON_Print(root));
+			char *payload = cJSON_Print(root);
+			if (payload == NULL) {
+				LOG_ERR("Error: cJSON_Print failed\n");
+				cJSON_Delete(root);
+				return;
+			}
+
+			client_send_request(CONFIG_COAP_TX_RESOURCE, COAP_CONTENT_FORMAT_APP_JSON, payload, COAP_METHOD_POST, COAP_TYPE_NON_CON);
+
+			cJSON_Delete(root);
+			free(payload);
+}
+
+static int client_get_device_config()
+{
+			client_send_request("device_config", COAP_CONTENT_FORMAT_TEXT_PLAIN, "123", COAP_METHOD_GET, COAP_TYPE_CON);
+}
+
 /**@brief Handles responses from the remote CoAP server. */
 static int client_handle_response(uint8_t *buf, int received)
 {
@@ -331,12 +384,49 @@ static int client_handle_response(uint8_t *buf, int received)
 	} else {
 		strcpy(temp_buf, "EMPTY");
 	}
-
 	/* STEP 9.4 - Log the header code, token and payload of the response */
 	LOG_INF("CoAP response: Code 0x%x, Token 0x%02x%02x, Payload: %s\n",
 	       coap_header_get_code(&reply), token[1], token[0], (char *)temp_buf);
 
+	handle_device_config_responce(payload);
+
 	return 0;
+}
+
+void handle_device_config_responce(char *device_config) {
+    cJSON *root = cJSON_Parse(device_config);
+    if (root == NULL) {
+        printf("Error: cJSON_Parse failed\n");
+        return;
+    }
+
+    cJSON *device_id = cJSON_GetObjectItem(root, "device_id");
+    cJSON *active_mode = cJSON_GetObjectItem(root, "active_mode");
+    cJSON *location_timeout = cJSON_GetObjectItem(root, "location_timeout");
+    cJSON *active_wait_timeout = cJSON_GetObjectItem(root, "active_wait_timeout");
+    cJSON *passive_wait_timeout = cJSON_GetObjectItem(root, "passive_wait_timeout");
+
+    if (device_id != NULL && cJSON_IsString(device_id)) {
+        strncpy(app_cfg.device_id, device_id->valuestring, sizeof(app_cfg.device_id) - 1);
+    }
+
+    if (active_mode != NULL && cJSON_IsNumber(active_mode)) {
+        app_cfg.active_mode = active_mode->valueint;
+    }
+
+    if (location_timeout != NULL && cJSON_IsNumber(location_timeout)) {
+        app_cfg.location_timeout = location_timeout->valueint;
+    }
+
+    if (active_wait_timeout != NULL && cJSON_IsNumber(active_wait_timeout)) {
+        app_cfg.active_wait_timeout = active_wait_timeout->valueint;
+    }
+
+    if (passive_wait_timeout != NULL && cJSON_IsNumber(passive_wait_timeout)) {
+        app_cfg.passive_wait_timeout = passive_wait_timeout->valueint;
+    }
+
+    cJSON_Delete(root);
 }
 
 static void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
@@ -438,9 +528,9 @@ static void button_handler(uint32_t button_state, uint32_t has_changed)
 	static bool toogle = 1;
 	if (has_changed & DK_BTN1_MSK && button_state & DK_BTN1_MSK) {
 		if (toogle == 1) {
-			client_send_request(CONFIG_COAP_RX_RESOURCE, COAP_CONTENT_FORMAT_TEXT_PLAIN, NULL, COAP_METHOD_GET);
+			client_send_request(CONFIG_COAP_RX_RESOURCE, COAP_CONTENT_FORMAT_TEXT_PLAIN, NULL, COAP_METHOD_GET, COAP_TYPE_NON_CON);
 		} else {
-			client_send_request(CONFIG_COAP_TX_RESOURCE, COAP_CONTENT_FORMAT_TEXT_PLAIN, MESSAGE_TO_SEND, COAP_METHOD_POST);
+			client_send_request(CONFIG_COAP_TX_RESOURCE, COAP_CONTENT_FORMAT_TEXT_PLAIN, MESSAGE_TO_SEND, COAP_METHOD_POST, COAP_TYPE_NON_CON);
 		}
 		toogle = !toogle;
 	}
@@ -448,6 +538,7 @@ static void button_handler(uint32_t button_state, uint32_t has_changed)
 
 static void on_state_init()
 {
+	client_get_device_config();
 	set_state(STATE_RUNNING);
 	if (app_cfg.active_mode)
 	{
@@ -536,6 +627,7 @@ int main(void)
 			LOG_ERR("Unknown state");
 			break;
 		}
+		client_send_post_request();
 		received = recv(sock, coap_buf, sizeof(coap_buf), 0);
 
 		if (received < 0) {
@@ -546,12 +638,14 @@ int main(void)
 			continue;
 		}
 
-		/* STEP 12 - Parse the received CoAP packet */
+		/* Parse the received CoAP packet */
 		err = client_handle_response(coap_buf, received);
 		if (err < 0) {
 			LOG_ERR("Invalid response, exit\n");
 			break;
 		}
+		
+		time.sleep(20);
 	}
 
 	(void)close(sock);

@@ -12,3 +12,5 @@ project(cellular_fundamentals)
 # NORDIC SDK APP START
 target_sources(app PRIVATE src/main.c)
 # NORDIC SDK APP END
+
+target_sources_ifdef(CONFIG_CJSON app PRIVATE src/cJSON.c)
