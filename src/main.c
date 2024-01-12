@@ -40,6 +40,8 @@ static enum sub_state_type {
 } sub_state;
 
 struct {
+	/**Device id for identifying the device*/
+	int device_id;
 	/**Device mode: Active or Passive*/
 	bool active_mode;
 	/**Location search timeout*/
@@ -312,43 +314,91 @@ static int client_send_post_request()
 			cJSON *root = cJSON_CreateObject();
 			if (root == NULL) {
 				printf("Error: cJSON_CreateObject failed\n");
-				return;
+				return -1;
 			}
 
 			if (!cJSON_AddStringToObject(root, "time", time_str)) {
 				LOG_ERR("Error: cJSON_AddStringToObject failed for time\n");
 				cJSON_Delete(root);
-				return;
+				return -1;
 			}
 
 			if (!cJSON_AddNumberToObject(root, "latitude", 67.111)) {
 				LOG_ERR("Error: cJSON_AddNumberToObject failed for latitude\n");
 				cJSON_Delete(root);
-				return;
+				return -1;
 			}
 
 			if (!cJSON_AddNumberToObject(root, "longitude", 27.111)) {
 				LOG_ERR("Error: cJSON_AddNumberToObject failed for longitude\n");
 				cJSON_Delete(root);
-				return;
+				return -1;
 			}
 			LOG_INF("Sending: %s", cJSON_Print(root));
 			char *payload = cJSON_Print(root);
 			if (payload == NULL) {
 				LOG_ERR("Error: cJSON_Print failed\n");
 				cJSON_Delete(root);
-				return;
+				return -1;
 			}
 
 			client_send_request(CONFIG_COAP_TX_RESOURCE, COAP_CONTENT_FORMAT_APP_JSON, payload, COAP_METHOD_POST, COAP_TYPE_NON_CON);
 
 			cJSON_Delete(root);
 			free(payload);
+
+			return 0;
 }
 
 static int client_get_device_config()
 {
-			client_send_request("device_config", COAP_CONTENT_FORMAT_TEXT_PLAIN, "123", COAP_METHOD_GET, COAP_TYPE_CON);
+	client_send_request("device_config", COAP_CONTENT_FORMAT_TEXT_PLAIN, "123", COAP_METHOD_GET, COAP_TYPE_CON);
+
+	return 0;
+}
+
+static int handle_device_config_responce(char *device_config) {
+    cJSON *root = cJSON_Parse(device_config);
+    if (root == NULL) {
+        printf("Error: cJSON_Parse failed\n");
+        return -1;
+    }
+
+    cJSON *device_id = cJSON_GetObjectItem(root, "device_id");
+    cJSON *active_mode = cJSON_GetObjectItem(root, "active_mode");
+    cJSON *location_timeout = cJSON_GetObjectItem(root, "location_timeout");
+    cJSON *active_wait_timeout = cJSON_GetObjectItem(root, "active_wait_timeout");
+    cJSON *passive_wait_timeout = cJSON_GetObjectItem(root, "passive_wait_timeout");
+
+    if (device_id != NULL && cJSON_IsNumber(device_id)) {
+		app_cfg.device_id = device_id->valueint;
+		LOG_INF("Device ID: %d", app_cfg.device_id);
+	}
+
+	if (active_mode != NULL && cJSON_IsNumber(active_mode)) {
+		app_cfg.active_mode = active_mode->valueint;
+		LOG_INF("Active Mode: %d", app_cfg.active_mode);
+	}
+
+	if (location_timeout != NULL && cJSON_IsNumber(location_timeout)) {
+		app_cfg.location_timeout = location_timeout->valueint;
+		LOG_INF("Location Timeout: %d", app_cfg.location_timeout);
+	}
+
+	if (active_wait_timeout != NULL && cJSON_IsNumber(active_wait_timeout)) {
+		app_cfg.active_wait_timeout = active_wait_timeout->valueint;
+		LOG_INF("Active Wait Timeout: %d", app_cfg.active_wait_timeout);
+	}
+
+	if (passive_wait_timeout != NULL && cJSON_IsNumber(passive_wait_timeout)) {
+		app_cfg.passive_wait_timeout = passive_wait_timeout->valueint;
+		LOG_INF("Passive Wait Timeout: %d", app_cfg.passive_wait_timeout);
+	}
+
+	LOG_INF("Device config updated successfully!");
+
+    cJSON_Delete(root);
+	return 0;
 }
 
 /**@brief Handles responses from the remote CoAP server. */
@@ -388,45 +438,10 @@ static int client_handle_response(uint8_t *buf, int received)
 	LOG_INF("CoAP response: Code 0x%x, Token 0x%02x%02x, Payload: %s\n",
 	       coap_header_get_code(&reply), token[1], token[0], (char *)temp_buf);
 
-	handle_device_config_responce(payload);
+	err = handle_device_config_responce(temp_buf);
+	if (err < 0)
 
 	return 0;
-}
-
-void handle_device_config_responce(char *device_config) {
-    cJSON *root = cJSON_Parse(device_config);
-    if (root == NULL) {
-        printf("Error: cJSON_Parse failed\n");
-        return;
-    }
-
-    cJSON *device_id = cJSON_GetObjectItem(root, "device_id");
-    cJSON *active_mode = cJSON_GetObjectItem(root, "active_mode");
-    cJSON *location_timeout = cJSON_GetObjectItem(root, "location_timeout");
-    cJSON *active_wait_timeout = cJSON_GetObjectItem(root, "active_wait_timeout");
-    cJSON *passive_wait_timeout = cJSON_GetObjectItem(root, "passive_wait_timeout");
-
-    if (device_id != NULL && cJSON_IsString(device_id)) {
-        strncpy(app_cfg.device_id, device_id->valuestring, sizeof(app_cfg.device_id) - 1);
-    }
-
-    if (active_mode != NULL && cJSON_IsNumber(active_mode)) {
-        app_cfg.active_mode = active_mode->valueint;
-    }
-
-    if (location_timeout != NULL && cJSON_IsNumber(location_timeout)) {
-        app_cfg.location_timeout = location_timeout->valueint;
-    }
-
-    if (active_wait_timeout != NULL && cJSON_IsNumber(active_wait_timeout)) {
-        app_cfg.active_wait_timeout = active_wait_timeout->valueint;
-    }
-
-    if (passive_wait_timeout != NULL && cJSON_IsNumber(passive_wait_timeout)) {
-        app_cfg.passive_wait_timeout = passive_wait_timeout->valueint;
-    }
-
-    cJSON_Delete(root);
 }
 
 static void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
