@@ -57,6 +57,8 @@ static struct nrf_modem_gnss_pvt_data_frame pvt_data;
 static int64_t gnss_start_time;
 static bool first_fix = false;
 
+static bool button_pressed = false;
+
 /* STEP 4.2 - Define the macros for the CoAP version and message length */
 #define APP_COAP_VERSION 1
 #define APP_COAP_MAX_MSG_LEN 1280
@@ -72,7 +74,7 @@ static struct sockaddr_storage server;
 
 static K_SEM_DEFINE(lte_connected, 0, 1);
 
-LOG_MODULE_REGISTER(Lesson6_Exercise2, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
 static char *sub_state_to_string(enum sub_state_type sub_state)
 {
@@ -352,7 +354,7 @@ static int client_send_post_request()
 
 static int client_get_device_config()
 {
-	client_send_request("device_config", COAP_CONTENT_FORMAT_TEXT_PLAIN, "123", COAP_METHOD_GET, COAP_TYPE_CON);
+	client_send_request("device_config", COAP_CONTENT_FORMAT_TEXT_PLAIN, NULL, COAP_METHOD_GET, COAP_TYPE_CON);
 
 	return 0;
 }
@@ -434,12 +436,16 @@ static int client_handle_response(uint8_t *buf, int received)
 	} else {
 		strcpy(temp_buf, "EMPTY");
 	}
+
 	/* STEP 9.4 - Log the header code, token and payload of the response */
 	LOG_INF("CoAP response: Code 0x%x, Token 0x%02x%02x, Payload: %s\n",
 	       coap_header_get_code(&reply), token[1], token[0], (char *)temp_buf);
 
 	err = handle_device_config_responce(temp_buf);
-	if (err < 0)
+	if (err < 0){
+		LOG_ERR("Failed to handle device config responce");
+		return err;
+	}
 
 	return 0;
 }
@@ -540,14 +546,9 @@ static int gnss_init_and_start(void)
 static void button_handler(uint32_t button_state, uint32_t has_changed)
 {
 	/*Send a GET request or PUT request upon button triggers */
-	static bool toogle = 1;
 	if (has_changed & DK_BTN1_MSK && button_state & DK_BTN1_MSK) {
-		if (toogle == 1) {
-			client_send_request(CONFIG_COAP_RX_RESOURCE, COAP_CONTENT_FORMAT_TEXT_PLAIN, NULL, COAP_METHOD_GET, COAP_TYPE_NON_CON);
-		} else {
-			client_send_request(CONFIG_COAP_TX_RESOURCE, COAP_CONTENT_FORMAT_TEXT_PLAIN, MESSAGE_TO_SEND, COAP_METHOD_POST, COAP_TYPE_NON_CON);
-		}
-		toogle = !toogle;
+		LOG_INF("Button pressed");
+		button_pressed = true;
 	}
 }
 
@@ -584,6 +585,8 @@ int main(void)
 {
 	int err;
 	int received;
+
+	static bool button_toogle = 1;
 
 	if (dk_leds_init() != 0) {
 		LOG_ERR("Failed to initialize the LED library");
@@ -642,7 +645,21 @@ int main(void)
 			LOG_ERR("Unknown state");
 			break;
 		}
-		client_send_post_request();
+
+		LOG_INF("Button_toogle: %d", button_toogle ? 1 : 0);
+		LOG_INF("Button_pressed: %d", button_pressed ? 1 : 0);
+
+		if (button_pressed)
+		{
+			button_pressed = false;
+	
+			if (button_toogle == 1) {
+				client_send_request(CONFIG_COAP_RX_RESOURCE, COAP_CONTENT_FORMAT_TEXT_PLAIN, NULL, COAP_METHOD_GET, COAP_TYPE_NON_CON);
+			} else {
+				client_send_post_request();
+			}
+			button_toogle = !button_toogle;
+		}
 		received = recv(sock, coap_buf, sizeof(coap_buf), 0);
 
 		if (received < 0) {
@@ -659,8 +676,6 @@ int main(void)
 			LOG_ERR("Invalid response, exit\n");
 			break;
 		}
-		
-		time.sleep(20);
 	}
 
 	(void)close(sock);
