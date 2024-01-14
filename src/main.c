@@ -42,7 +42,7 @@ static enum sub_state_type {
 
 #define MODULE app_module
 
-LOG_MODULE_REGISTER(MODULE, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(MODULE, LOG_LEVEL_DBG);
 
 struct app_msg_data {
 	union {
@@ -141,37 +141,37 @@ static bool app_event_handler(const struct app_event_header *aeh){
 	return consume;
 }
 
-static void on_state_init()
+static void on_state_init(struct app_msg_data *msg)
 {
 	set_state(STATE_RUNNING);
 	set_sub_state(SUB_STATE_ACTIVE_MODE);
 }
 
-static void on_state_running()
+static void on_state_running(struct app_msg_data *msg)
 {
 	
 }
 
-static void on_sub_state_active()
+static void on_sub_state_active(struct app_msg_data *msg)
 {
 	
 }
 
-static void on_sub_state_passive()
+static void on_sub_state_passive(struct app_msg_data *msg)
 {
 	
 }
 
 int main(void)
-{
-	LOG_INF("Main thread started!");
+{	
+	int err;
 
 	if (app_event_manager_init()) {
 		LOG_ERR("Application Event Manager not initialized");
 	}
 
 	struct app_module_event *app_module_event = new_app_module_event();
-	app_module_event->type = APP_EVENT_STARTED;
+	app_module_event->type = APP_EVENT_START;
 	APP_EVENT_SUBMIT(app_module_event);
 
 	while (1)
@@ -186,20 +186,20 @@ int main(void)
 			switch (state)
 			{
 			case STATE_INIT:
-				on_state_init();
+				on_state_init(&msg);
 				break;
 			case STATE_RUNNING:
 				switch (sub_state)
 				{
 				case SUB_STATE_ACTIVE_MODE:
-					on_sub_state_active();
+					on_sub_state_active(&msg);
 					break;
 				case SUB_STATE_PASSIVE_MODE:
-					on_sub_state_passive();
+					on_sub_state_passive(&msg);
 					break;
 				default:
 					break;
-				on_state_running();
+				on_state_running(&msg);
 				}
 				break;
 			case STATE_SHUTDOWN:

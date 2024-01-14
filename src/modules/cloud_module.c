@@ -70,8 +70,6 @@ struct {
 	int passive_wait_timeout;
 } app_cfg;
 
-static bool button_pressed = false;
-
 /* STEP 4.2 - Define the macros for the CoAP version and message length */
 #define APP_COAP_VERSION 1
 #define APP_COAP_MAX_MSG_LEN 1280
@@ -83,9 +81,12 @@ static uint8_t coap_buf[APP_COAP_MAX_MSG_LEN];
 static uint16_t next_token;
 
 static int sock;
+
+K_SEM_DEFINE(socket_sem, 1, 1);  // Initialize a semaphore with an initial count of 1 and a maximum count of 1
+
 static struct sockaddr_storage server;
 
-LOG_MODULE_REGISTER(MODULE, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(MODULE, LOG_LEVEL_DBG);
 
 static char *sub_state_to_string(enum sub_state_type sub_state)
 {
@@ -195,18 +196,34 @@ static int client_init(void)
 {
 	int err;
 
+	k_sem_take(&socket_sem, K_FOREVER); // Take the semaphore
+
 	sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if (sock < 0) {
 		LOG_ERR("Failed to create CoAP socket: %d.\n", errno);
 		return -errno;
 	}
 
+	/* Set the socket to non-blocking mode */
+	int flags = fcntl(sock, F_GETFL, 0);
+	if (flags == -1) {
+		LOG_ERR("Could not get socket flags\n");
+		return -errno;
+	}
+	int ret = fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+	if (ret == -1) {
+		LOG_ERR("Could not set socket to non-blocking mode\n");
+		return -errno;
+	}
+
 	err = connect(sock, (struct sockaddr *)&server,
-		      sizeof(struct sockaddr_in));
+				  sizeof(struct sockaddr_in));
 	if (err < 0) {
 		LOG_ERR("Connect failed : %d\n", errno);
 		return -errno;
 	}
+
+	k_sem_give(&socket_sem, K_FOREVER); // Give the semaphore
 
 	LOG_INF("Successfully connected to server");
 
@@ -266,11 +283,15 @@ static int client_send_request(const char *resource_path, uint8_t content_type, 
 		}
 	}
 
+	k_sem_take(&socket_sem, K_FOREVER); // Take the semaphore
+
 	err = send(sock, request.data, request.offset, 0);
 	if (err < 0) {
 		LOG_ERR("Failed to send CoAP request, %d\n", errno);
 		return -errno;
 	}
+
+	k_sem_give(&socket_sem); // Give the semaphore
 
 	LOG_INF("CoAP request sent: Token 0x%04x\n", next_token);
 
@@ -426,8 +447,6 @@ static void button_handler(uint32_t button_state, uint32_t has_changed)
 {
 	/*Send a GET request or PUT request upon button triggers */
 	if (has_changed & DK_BTN1_MSK && button_state & DK_BTN1_MSK) {
-		// LOG_INF("Button pressed");
-		// button_pressed = true;
 		struct cloud_module_event *cloud_module_event = new_cloud_module_event();
 		cloud_module_event->type = CLOUD_EVENT_BUTTON_PRESSED;
 		APP_EVENT_SUBMIT(cloud_module_event);
@@ -442,6 +461,10 @@ static void connect_cloud() {
 	if (client_init() != 0) {
 		LOG_INF("Failed to initialize client");
 	}
+
+	struct cloud_module_event *cloud_module_event = new_cloud_module_event();
+	cloud_module_event->type = CLOUD_EVENT_SERVER_CONNECTED;
+	APP_EVENT_SUBMIT(cloud_module_event);
 }
 
 static void on_state_lte_init(struct cloud_msg_data *msg)
@@ -466,6 +489,11 @@ static void on_state_lte_connected(struct cloud_msg_data *msg)
 	if (msg->module.modem.type == MODEM_EVENT_LTE_DISCONNECTED) {
 		set_state(STATE_LTE_DISCONNECTED);
 		set_sub_state(SUB_STATE_SERVER_DISCONNECTED);
+	}
+
+	if (msg->module.cloud.type == CLOUD_EVENT_SERVER_CONNECTED) {
+		set_sub_state(SUB_STATE_SERVER_CONNECTED);
+		client_get_device_config();
 	}
 }
 
@@ -494,9 +522,6 @@ static void on_all_states(struct cloud_msg_data *msg)
 int cloud_thread_fn(void)
 {
 	int err;
-	int received;
-
-	// static bool button_toogle = 1;
 
 	
 	// k_sleep(K_SECONDS(20));
@@ -545,69 +570,76 @@ int cloud_thread_fn(void)
 			}
 			on_all_states(&msg);
 		}
-		// LOG_INF("Button_toogle: %d", button_toogle ? 1 : 0);
-		// LOG_INF("Button_pressed: %d", button_pressed ? 1 : 0);
-
-		// if (button_pressed)
-		// {
-		// 	button_pressed = false;
-	
-		// 	if (button_toogle == 1) {
-		// 		client_send_request(CONFIG_COAP_RX_RESOURCE, COAP_CONTENT_FORMAT_TEXT_PLAIN, NULL, COAP_METHOD_GET, COAP_TYPE_NON_CON);
-		// 	} else {
-		// 		client_send_post_request();
-		// 	}
-		// 	button_toogle = !button_toogle;
-		// }
-		received = recv(sock, coap_buf, sizeof(coap_buf), 0);
-
-		if (received < 0) {
-			LOG_ERR("Socket error: %d, exit\n", errno);
-			break;
-		} else if (received == 0) {
-			LOG_INF("Empty datagram\n");
-			continue;
-		}
-
-		/* Parse the received CoAP packet */
-		err = client_handle_response(coap_buf, received);
-		if (err < 0) {
-			LOG_ERR("Invalid response, exit\n");
-			break;
-		}
 	}
 
+	k_sem_take(&socket_sem, K_FOREVER); // Take the semaphore
+
 	(void)close(sock);
+
+	k_sem_give(&socket_sem); // Give the semaphore
 
 	return 0;
 }
 
-// int cloud_thread_fn(void)
-// {	
-// 	LOG_INF("Cloud thread started!");
-// 	while (1) {
-// 		LOG_INF("Cloud thread running!");
-// 		k_sleep(K_SECONDS(20));
-// 	}
+void coap_response_thread_fs(void *arg1, void *arg2, void *arg3){
 
-// 	return 0;
-// }
+	int received;
+	int err;
 
+	k_sleep(K_SECONDS(30));
 
-// int module_thread_fn(void)
-// {
-// 	LOG_INF("Modem module started");
-// 	while (1) {
-// 		LOG_INF("Modem module running");
-// 		k_sleep(K_SECONDS(10));
-// 	}
-// 	return 0;//}
+    while (1) 
+	{
+		switch (state)
+		{
+		case STATE_LTE_INIT:
+			break;
+		case STATE_LTE_DISCONNECTED:
+			break;
+		case STATE_LTE_CONNECTED:
+			switch (sub_state)
+			{
+			case SUB_STATE_SERVER_DISCONNECTED:
+				break;
+			case SUB_STATE_SERVER_CONNECTED:
 
+				LOG_INF("Waiting for data");
 
-// K_THREAD_DEFINE(modem_module_thread, CONFIG_MODEM_THREAD_STACK_SIZE,
-// 		module_thread_fn, NULL, NULL, NULL,
-// 		K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
+				k_sem_take(&socket_sem, K_FOREVER); // Take the semaphore
+				
+				received = recv(sock, coap_buf, sizeof(coap_buf), 0);
 
+				k_sem_give(&socket_sem); // Give the semaphore
+
+				if (received < 0) {
+					LOG_ERR("Socket error: %d, exit\n", errno);
+					break;
+				} else if (received == 0) {
+					LOG_INF("Empty datagram\n");
+					continue;
+				}
+
+				/* Parse the received CoAP packet */
+				err = client_handle_response(coap_buf, received);
+				if (err < 0) {
+					LOG_ERR("Handle response error: %d, exit\n", errno);
+					break;
+				}
+				break;
+			default:
+				break;
+			}
+			break;
+		case STATE_SHUTDOWN:
+			break;
+		}
+		k_sleep(K_SECONDS(20));
+    }
+}
+
+K_THREAD_DEFINE(coap_thread_id, 2048,
+		coap_response_thread_fs, NULL, NULL, NULL, 
+		K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
 
 K_THREAD_DEFINE(cloud_module_thread, 2048,
 		cloud_thread_fn, NULL, NULL, NULL,

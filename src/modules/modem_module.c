@@ -53,7 +53,7 @@ static K_SEM_DEFINE(lte_connected, 0, 1);
 
 #define MODULE modem_module
 
-LOG_MODULE_REGISTER(MODULE, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(MODULE, LOG_LEVEL_DBG);
 static char *state_to_string(enum state_type state)
 {
 	switch (state)
@@ -185,6 +185,12 @@ static int modem_configure(void)
 	LOG_INF("Connected to LTE network");
 	dk_set_led_on(DK_LED2);
 
+	struct modem_module_event *modem_module_event = new_modem_module_event();
+
+	modem_module_event->type = MODEM_EVENT_LTE_CONNECTED;
+
+	APP_EVENT_SUBMIT(modem_module_event);
+
 	return 0;
 }
 
@@ -283,10 +289,12 @@ static int gnss_init_and_start(void)
 	return 0;
 }
 
-static void on_state_disconnected()
+static void on_state_disconnected(struct modem_msg_data *msg)
 {
-	set_state(STATE_CONNECTING);
-	set_sub_state(SUB_STATE_ACTIVE_MODE);
+	if (msg->module.app.type == APP_EVENT_START) {
+		modem_configure();
+		set_state(STATE_CONNECTING);
+	}
 }
 
 static void on_state_connecting()
@@ -329,12 +337,14 @@ int module_thread_fn(void)
 			switch (state)
 			{
 			case STATE_DISCONNECTED:
-				on_state_init();
+				on_state_disconnected(&msg);
 				break;
 			case STATE_CONNECTING:
-				on_state_connecting();
+				break;
+				on_state_connecting(&msg);
 			case STATE_CONNECTED:
-				on_state_connected();
+				on_state_connected(&msg);
+				break;
 			case STATE_SHUTDOWN:
 				break;
 			
