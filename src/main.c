@@ -170,38 +170,47 @@ int main(void)
 		LOG_ERR("Application Event Manager not initialized");
 	}
 
+	struct app_module_event *app_module_event = new_app_module_event();
+	app_module_event->type = APP_EVENT_STARTED;
+	APP_EVENT_SUBMIT(app_module_event);
+
 	while (1)
-	{
-		LOG_INF("Main thread running!");
+	{	
+		struct app_msg_data msg = {0};
+        err = k_msgq_get(&msgq_app, &msg, K_FOREVER);
+		if (err) {
+            LOG_ERR("Failed to get event from message queue: %d", err);
+            /* Handle the error */
+        } else {
 
-		switch (state)
-		{
-		case STATE_INIT:
-			on_state_init();
-			break;
-		case STATE_RUNNING:
-			switch (sub_state)
+			switch (state)
 			{
-			case SUB_STATE_ACTIVE_MODE:
-				on_sub_state_active();
+			case STATE_INIT:
+				on_state_init();
 				break;
-			case SUB_STATE_PASSIVE_MODE:
-				on_sub_state_passive();
+			case STATE_RUNNING:
+				switch (sub_state)
+				{
+				case SUB_STATE_ACTIVE_MODE:
+					on_sub_state_active();
+					break;
+				case SUB_STATE_PASSIVE_MODE:
+					on_sub_state_passive();
+					break;
+				default:
+					break;
+				on_state_running();
+				}
 				break;
+			case STATE_SHUTDOWN:
+				break;
+			
 			default:
+				LOG_ERR("Unknown state");
 				break;
-			on_state_running();
 			}
-			break;
-		case STATE_SHUTDOWN:
-			break;
-		
-		default:
-			LOG_ERR("Unknown state");
-			break;
 		}
-
-		k_sleep(K_SECONDS(20));
+		// k_sleep(K_SECONDS(20));
 	}
 
 	return 0;
