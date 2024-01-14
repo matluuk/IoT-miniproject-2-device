@@ -22,24 +22,11 @@
 
 /* Application module super states. */
 static enum state_type {
-	STATE_INIT,
-	STATE_RUNNING,
-	STATE_SHUTDOWN
+	STATE_DISCONNECTED,
+	STATE_CONNECTED,
+	STATE_CONNECTING,
+	STATE_SHUTDOWN,
 } state;
-
-/* Application sub states. The application can be in either active or passive
- * mode.
- *
- * Active mode: Sensor GNSS position is acquired at a configured
- *		interval and sent to cloud.
- *
- * Passive mode: Sensor GNSS position is acquired when movement is
- *		 detected, or after the configured movement timeout occurs.
- */
-static enum sub_state_type {
-	SUB_STATE_ACTIVE_MODE,
-	SUB_STATE_PASSIVE_MODE,
-} sub_state;
 
 struct modem_msg_data {
 	union {
@@ -67,28 +54,14 @@ static K_SEM_DEFINE(lte_connected, 0, 1);
 #define MODULE modem_module
 
 LOG_MODULE_REGISTER(MODULE, LOG_LEVEL_INF);
-
-static char *sub_state_to_string(enum sub_state_type sub_state)
-{
-	switch (sub_state)
-	{
-	case SUB_STATE_ACTIVE_MODE:
-		return "SUB_STATE_ACTIVE_MODE";
-	case SUB_STATE_PASSIVE_MODE:
-		return "SUB_STATE_PASSIVE_MODE";
-	default:
-		return "Unknown";
-	}
-}
-
 static char *state_to_string(enum state_type state)
 {
 	switch (state)
 	{
-	case STATE_INIT:
-		return "STATE_INIT";
-	case STATE_RUNNING:
-		return "STATE_RUNNING";
+	case STATE_DISCONNECTED:
+		return "STATE_DISCONNECTED";
+	case STATE_CONNECTING:
+		return "STATE_CONNECTING";
 	case STATE_SHUTDOWN:
 		return "STATE_SHUTDOWN";
 	default:
@@ -106,18 +79,6 @@ static void set_state(enum state_type new_state)
 		state_to_string(state),
 		state_to_string(new_state));
 	state = new_state;
-}
-
-static void set_sub_state(enum sub_state_type new_sub_state)
-{
-	if (new_sub_state == sub_state) {
-		LOG_DBG("Sub state: %s", state_to_string(sub_state));
-		return;
-	}
-	LOG_DBG("Sub state transition: %s -> %s", 
-		sub_state_to_string(sub_state),
-		sub_state_to_string(new_sub_state));
-	sub_state = new_sub_state;
 }
 
 static bool app_event_handler(const struct app_event_header *aeh){
@@ -322,23 +283,18 @@ static int gnss_init_and_start(void)
 	return 0;
 }
 
-static void on_state_init()
+static void on_state_disconnected()
 {
-	set_state(STATE_RUNNING);
+	set_state(STATE_CONNECTING);
 	set_sub_state(SUB_STATE_ACTIVE_MODE);
 }
 
-static void on_state_running()
+static void on_state_connecting()
 {
 	
 }
 
-static void on_sub_state_active()
-{
-	
-}
-
-static void on_sub_state_passive()
+static void on_state_connected()
 {
 	
 }
@@ -364,34 +320,30 @@ int module_thread_fn(void)
 
 	while (1) {
 		LOG_INF("modem_module running");
-
-		switch (state)
-		{
-		case STATE_INIT:
-			on_state_init();
-			break;
-		case STATE_RUNNING:
-			switch (sub_state)
+		struct modem_msg_data msg = {0};
+        err = k_msgq_get(&msgq_modem, &msg, K_FOREVER);
+		if (err) {
+            LOG_ERR("Failed to get event from message queue: %d", err);
+            /* Handle the error */
+        } else {
+			switch (state)
 			{
-			case SUB_STATE_ACTIVE_MODE:
-				on_sub_state_active();
+			case STATE_DISCONNECTED:
+				on_state_init();
 				break;
-			case SUB_STATE_PASSIVE_MODE:
-				on_sub_state_passive();
+			case STATE_CONNECTING:
+				on_state_connecting();
+			case STATE_CONNECTED:
+				on_state_connected();
+			case STATE_SHUTDOWN:
 				break;
+			
 			default:
+				LOG_ERR("Unknown state");
 				break;
-			on_state_running();
 			}
-			break;
-		case STATE_SHUTDOWN:
-			break;
-		
-		default:
-			LOG_ERR("Unknown state");
-			break;
 		}
-		k_sleep(K_SECONDS(20));
+		// k_sleep(K_SECONDS(20));
 	}
 
 	return 0;
