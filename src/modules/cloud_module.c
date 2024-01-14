@@ -496,10 +496,10 @@ int cloud_thread_fn(void)
 	int err;
 	int received;
 
-	static bool button_toogle = 1;
+	// static bool button_toogle = 1;
 
 	
-	k_sleep(K_SECONDS(20));
+	// k_sleep(K_SECONDS(20));
 
 	LOG_INF("Cloud module started");
 
@@ -545,20 +545,20 @@ int cloud_thread_fn(void)
 			}
 			on_all_states(&msg);
 		}
-		LOG_INF("Button_toogle: %d", button_toogle ? 1 : 0);
-		LOG_INF("Button_pressed: %d", button_pressed ? 1 : 0);
+		// LOG_INF("Button_toogle: %d", button_toogle ? 1 : 0);
+		// LOG_INF("Button_pressed: %d", button_pressed ? 1 : 0);
 
-		if (button_pressed)
-		{
-			button_pressed = false;
+		// if (button_pressed)
+		// {
+		// 	button_pressed = false;
 	
-			if (button_toogle == 1) {
-				client_send_request(CONFIG_COAP_RX_RESOURCE, COAP_CONTENT_FORMAT_TEXT_PLAIN, NULL, COAP_METHOD_GET, COAP_TYPE_NON_CON);
-			} else {
-				client_send_post_request();
-			}
-			button_toogle = !button_toogle;
-		}
+		// 	if (button_toogle == 1) {
+		// 		client_send_request(CONFIG_COAP_RX_RESOURCE, COAP_CONTENT_FORMAT_TEXT_PLAIN, NULL, COAP_METHOD_GET, COAP_TYPE_NON_CON);
+		// 	} else {
+		// 		client_send_post_request();
+		// 	}
+		// 	button_toogle = !button_toogle;
+		// }
 		received = recv(sock, coap_buf, sizeof(coap_buf), 0);
 
 		if (received < 0) {
