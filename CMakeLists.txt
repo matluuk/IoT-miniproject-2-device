@@ -13,4 +13,13 @@ project(cellular_fundamentals)
 target_sources(app PRIVATE src/main.c)
 # NORDIC SDK APP END
 
+target_include_directories(app PRIVATE src)
 target_sources_ifdef(CONFIG_CJSON app PRIVATE src/cJSON.c)
+
+target_sources(app PRIVATE
+		src/events/app_module_event.c
+)
+
+# Application directories
+add_subdirectory(src/modules)
+add_subdirectory(src/events)
