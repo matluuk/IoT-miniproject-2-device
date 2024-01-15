@@ -204,18 +204,6 @@ static int client_init(void)
 		return -errno;
 	}
 
-	/* Set the socket to non-blocking mode */
-	int flags = fcntl(sock, F_GETFL, 0);
-	if (flags == -1) {
-		LOG_ERR("Could not get socket flags\n");
-		return -errno;
-	}
-	int ret = fcntl(sock, F_SETFL, flags | O_NONBLOCK);
-	if (ret == -1) {
-		LOG_ERR("Could not set socket to non-blocking mode\n");
-		return -errno;
-	}
-
 	err = connect(sock, (struct sockaddr *)&server,
 				  sizeof(struct sockaddr_in));
 	if (err < 0) {
@@ -223,7 +211,7 @@ static int client_init(void)
 		return -errno;
 	}
 
-	k_sem_give(&socket_sem, K_FOREVER); // Give the semaphore
+	k_sem_give(&socket_sem); // Give the semaphore
 
 	LOG_INF("Successfully connected to server");
 
@@ -586,54 +574,44 @@ void coap_response_thread_fs(void *arg1, void *arg2, void *arg3){
 	int received;
 	int err;
 
-	k_sleep(K_SECONDS(30));
+	// k_sleep(K_SECONDS(30));
 
     while (1) 
 	{
-		switch (state)
-		{
-		case STATE_LTE_INIT:
-			break;
-		case STATE_LTE_DISCONNECTED:
-			break;
-		case STATE_LTE_CONNECTED:
-			switch (sub_state)
-			{
-			case SUB_STATE_SERVER_DISCONNECTED:
-				break;
-			case SUB_STATE_SERVER_CONNECTED:
+		if (state == STATE_LTE_CONNECTED && sub_state == SUB_STATE_SERVER_CONNECTED) {
 
-				LOG_INF("Waiting for data");
+			LOG_INF("Looking for CoAP data");
 
-				k_sem_take(&socket_sem, K_FOREVER); // Take the semaphore
-				
-				received = recv(sock, coap_buf, sizeof(coap_buf), 0);
+			k_sem_take(&socket_sem, K_FOREVER); // Take the semaphore
+			
+			received = recv(sock, coap_buf, sizeof(coap_buf), ZSOCK_MSG_DONTWAIT);
 
-				k_sem_give(&socket_sem); // Give the semaphore
+			k_sem_give(&socket_sem); // Give the semaphore
 
-				if (received < 0) {
+			if (received < 0) {
+				if (errno == EAGAIN || errno == EWOULDBLOCK) {
+					/* No data available, yield the thread to allow other threads to run */
+					k_yield();
+					continue;
+				} else {
 					LOG_ERR("Socket error: %d, exit\n", errno);
 					break;
-				} else if (received == 0) {
-					LOG_INF("Empty datagram\n");
-					continue;
 				}
+			} else if (received == 0) {
+				LOG_INF("Empty datagram\n");
+				continue;
+			}
 
-				/* Parse the received CoAP packet */
-				err = client_handle_response(coap_buf, received);
-				if (err < 0) {
-					LOG_ERR("Handle response error: %d, exit\n", errno);
-					break;
-				}
-				break;
-			default:
+			/* Parse the received CoAP packet */
+			err = client_handle_response(coap_buf, received);
+			if (err < 0) {
+				LOG_ERR("Handle response error: %d, exit\n", errno);
 				break;
 			}
-			break;
-		case STATE_SHUTDOWN:
-			break;
 		}
-		k_sleep(K_SECONDS(20));
+		else {
+			k_yield();
+		}
     }
 }
 
