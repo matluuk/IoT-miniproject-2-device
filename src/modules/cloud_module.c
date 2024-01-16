@@ -143,22 +143,26 @@ static void set_sub_state(enum sub_state_type new_sub_state)
 }
 
 static bool app_event_handler(const struct app_event_header *aeh){
+	LOG_INF("App event handler");
 	bool consume = false, enqueue_msg = false;
 	struct cloud_msg_data msg = {0};
 	if (is_app_module_event(aeh)){
 		struct app_module_event *event = cast_app_module_event(aeh);
 		msg.module.app = *event;
+		enqueue_msg = true;
 	}
 	
 	if (is_cloud_module_event(aeh)){
 		struct cloud_module_event *event = cast_cloud_module_event(aeh);
 		msg.module.cloud = *event;
+		enqueue_msg = true;
 	}
 
 	
 	if (is_modem_module_event(aeh)){
 		struct modem_module_event *event = cast_modem_module_event(aeh);
 		msg.module.modem = *event;
+		enqueue_msg = true;
 	}
 
 	// __ASSERT_NO_MSG(false);
@@ -306,13 +310,25 @@ static int client_send_post_request()
 				return -1;
 			}
 
-			if (!cJSON_AddNumberToObject(root, "latitude", 67.111)) {
+			if (!cJSON_AddNumberToObject(root, "latitude", 65.132)) {
 				LOG_ERR("Error: cJSON_AddNumberToObject failed for latitude\n");
 				cJSON_Delete(root);
 				return -1;
 			}
 
-			if (!cJSON_AddNumberToObject(root, "longitude", 27.111)) {
+			if (!cJSON_AddNumberToObject(root, "longitude", 25.121)) {
+				LOG_ERR("Error: cJSON_AddNumberToObject failed for longitude\n");
+				cJSON_Delete(root);
+				return -1;
+			}
+
+			if (!cJSON_AddNumberToObject(root, "altitude", 123.456)) {
+				LOG_ERR("Error: cJSON_AddNumberToObject failed for longitude\n");
+				cJSON_Delete(root);
+				return -1;
+			}
+
+			if (!cJSON_AddNumberToObject(root, "accuracy", 12.345)) {
 				LOG_ERR("Error: cJSON_AddNumberToObject failed for longitude\n");
 				cJSON_Delete(root);
 				return -1;
@@ -414,6 +430,12 @@ static int client_handle_response(uint8_t *buf, int received)
 
 	if (payload_len > 0) {
 		snprintf(temp_buf, MIN(payload_len + 1, sizeof(temp_buf)), "%s", payload);
+
+		err = handle_device_config_responce(temp_buf);
+		if (err < 0){
+			LOG_ERR("Failed to handle device config responce");
+			return err;
+		}
 	} else {
 		strcpy(temp_buf, "EMPTY");
 	}
@@ -421,12 +443,6 @@ static int client_handle_response(uint8_t *buf, int received)
 	/* STEP 9.4 - Log the header code, token and payload of the response */
 	LOG_INF("CoAP response: Code 0x%x, Token 0x%02x%02x, Payload: %s\n",
 	       coap_header_get_code(&reply), token[1], token[0], (char *)temp_buf);
-
-	err = handle_device_config_responce(temp_buf);
-	if (err < 0){
-		LOG_ERR("Failed to handle device config responce");
-		return err;
-	}
 
 	return 0;
 }
@@ -478,16 +494,14 @@ static void on_state_lte_connected(struct cloud_msg_data *msg)
 		set_state(STATE_LTE_DISCONNECTED);
 		set_sub_state(SUB_STATE_SERVER_DISCONNECTED);
 	}
-
-	if (msg->module.cloud.type == CLOUD_EVENT_SERVER_CONNECTED) {
-		set_sub_state(SUB_STATE_SERVER_CONNECTED);
-		client_get_device_config();
-	}
 }
 
 static void on_sub_state_server_disconnected(struct cloud_msg_data *msg)
 {
-	
+	if (msg->module.cloud.type == CLOUD_EVENT_SERVER_CONNECTED) {
+		set_sub_state(SUB_STATE_SERVER_CONNECTED);
+		client_get_device_config();
+	}
 }
 
 static void on_sub_state_server_connected(struct cloud_msg_data *msg)
@@ -510,9 +524,11 @@ static void on_all_states(struct cloud_msg_data *msg)
 int cloud_thread_fn(void)
 {
 	int err;
+    struct cloud_msg_data msg = {0};
 
-	
-	// k_sleep(K_SECONDS(20));
+	LOG_INF("started!");
+
+	k_sleep(K_SECONDS(3));
 
 	LOG_INF("Cloud module started");
 
@@ -521,12 +537,13 @@ int cloud_thread_fn(void)
 	}
 
 	while (1) {
-        struct cloud_msg_data msg = {0};
+		LOG_INF("Waiting for event");
         err = k_msgq_get(&msgq_cloud, &msg, K_FOREVER);
 		if (err) {
             LOG_ERR("Failed to get event from message queue: %d", err);
             /* Handle the error */
         } else {
+			LOG_INF("Got event!");
 			switch (state)
 			{
 			case STATE_LTE_INIT:
@@ -580,7 +597,7 @@ void coap_response_thread_fs(void *arg1, void *arg2, void *arg3){
 	{
 		if (state == STATE_LTE_CONNECTED && sub_state == SUB_STATE_SERVER_CONNECTED) {
 
-			LOG_INF("Looking for CoAP data");
+			// LOG_DBG("Looking for CoAP data");
 
 			k_sem_take(&socket_sem, K_FOREVER); // Take the semaphore
 			
@@ -606,7 +623,6 @@ void coap_response_thread_fs(void *arg1, void *arg2, void *arg3){
 			err = client_handle_response(coap_buf, received);
 			if (err < 0) {
 				LOG_ERR("Handle response error: %d, exit\n", errno);
-				break;
 			}
 		}
 		else {

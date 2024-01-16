@@ -8,6 +8,7 @@
 #include <zephyr/logging/log.h>
 #include <dk_buttons_and_leds.h>
 #include <modem/nrf_modem_lib.h>
+#include <zephyr/sys/reboot.h>
 #include <modem/lte_lc.h>
 #include <nrf_modem_gnss.h>
 
@@ -109,22 +110,26 @@ static void set_sub_state(enum sub_state_type new_sub_state)
 }
 
 static bool app_event_handler(const struct app_event_header *aeh){
+	LOG_INF("App event handler");
 	bool consume = false, enqueue_msg = false;
 	struct app_msg_data msg = {0};
 	if (is_app_module_event(aeh)){
 		struct app_module_event *event = cast_app_module_event(aeh);
 		msg.module.app = *event;
+		enqueue_msg = true;
 	}
 	
 	if (is_cloud_module_event(aeh)){
 		struct cloud_module_event *event = cast_cloud_module_event(aeh);
 		msg.module.cloud = *event;
+		enqueue_msg = true;
 	}
 
 	
 	if (is_modem_module_event(aeh)){
 		struct modem_module_event *event = cast_modem_module_event(aeh);
 		msg.module.modem = *event;
+		enqueue_msg = true;
 	}
 
 	// __ASSERT_NO_MSG(false);
@@ -165,23 +170,32 @@ static void on_sub_state_passive(struct app_msg_data *msg)
 int main(void)
 {	
 	int err;
+	struct app_msg_data msg = {0};
+
+	k_sleep(K_SECONDS(3));
+
+	LOG_INF("Application started");
 
 	if (app_event_manager_init()) {
-		LOG_ERR("Application Event Manager not initialized");
+		LOG_ERR("Application Event Manager could not be initialized, rebooting...");
+		k_sleep(K_SECONDS(5));
+		sys_reboot(SYS_REBOOT_COLD);
+	} else {
+		LOG_INF("Application Event Manager initialized");
+		struct app_module_event *app_module_event = new_app_module_event();
+		app_module_event->type = APP_EVENT_START;
+		APP_EVENT_SUBMIT(app_module_event);
 	}
-
-	struct app_module_event *app_module_event = new_app_module_event();
-	app_module_event->type = APP_EVENT_START;
-	APP_EVENT_SUBMIT(app_module_event);
 
 	while (1)
 	{	
-		struct app_msg_data msg = {0};
+		LOG_INF("Waiting for event!");
         err = k_msgq_get(&msgq_app, &msg, K_FOREVER);
 		if (err) {
             LOG_ERR("Failed to get event from message queue: %d", err);
             /* Handle the error */
         } else {
+			LOG_INF("Got event!");
 
 			switch (state)
 			{

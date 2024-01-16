@@ -60,6 +60,8 @@ static char *state_to_string(enum state_type state)
 	{
 	case STATE_DISCONNECTED:
 		return "STATE_DISCONNECTED";
+	case STATE_CONNECTED:
+		return "STATE_CONNECTED";
 	case STATE_CONNECTING:
 		return "STATE_CONNECTING";
 	case STATE_SHUTDOWN:
@@ -82,22 +84,26 @@ static void set_state(enum state_type new_state)
 }
 
 static bool app_event_handler(const struct app_event_header *aeh){
+	LOG_INF("App event handler");
 	bool consume = false, enqueue_msg = false;
 	struct modem_msg_data msg = {0};
 	if (is_app_module_event(aeh)){
 		struct app_module_event *event = cast_app_module_event(aeh);
 		msg.module.app = *event;
+		enqueue_msg = true;
 	}
 	
 	if (is_cloud_module_event(aeh)){
 		struct cloud_module_event *event = cast_cloud_module_event(aeh);
 		msg.module.cloud = *event;
+		enqueue_msg = true;
 	}
 
 	
 	if (is_modem_module_event(aeh)){
 		struct modem_module_event *event = cast_modem_module_event(aeh);
 		msg.module.modem = *event;
+		enqueue_msg = true;
 	}
 
 	// __ASSERT_NO_MSG(false);
@@ -291,49 +297,65 @@ static int gnss_init_and_start(void)
 
 static void on_state_disconnected(struct modem_msg_data *msg)
 {
+	int err;
+
 	if (msg->module.app.type == APP_EVENT_START) {
-		modem_configure();
-		set_state(STATE_CONNECTING);
+		err = modem_configure();
+		if (err) {
+			LOG_ERR("Failed to configure the modem");
+		}
+		// set_state(STATE_CONNECTING);
+	}
+
+	if (msg->module.modem.type == MODEM_EVENT_LTE_CONNECTED) {
+		set_state(STATE_CONNECTED);
+
+		if (gnss_init_and_start() != 0) {
+			LOG_ERR("Failed to initialize and start GNSS");
+		}
 	}
 }
 
-static void on_state_connecting()
+static void on_state_connecting(struct modem_msg_data *msg)
 {
-	
+	// if (msg->module.modem.type == MODEM_EVENT_LTE_CONNECTED) {
+	// 	set_state(STATE_CONNECTED);
+
+	// 	if (gnss_init_and_start() != 0) {
+	// 		LOG_ERR("Failed to initialize and start GNSS");
+	// 	}
+	// }
 }
 
-static void on_state_connected()
+static void on_state_connected(struct modem_msg_data *msg)
 {
-	
+	if (msg->module.modem.type == MODEM_EVENT_LTE_DISCONNECTED) {
+		set_state(STATE_DISCONNECTED);
+	}
 }
 
 int module_thread_fn(void)
 {
 	int err;
+	struct modem_msg_data msg = {0};
+
+	LOG_INF("started!");
+
+	k_sleep(K_SECONDS(3));
 
 	if (dk_leds_init() != 0) {
 		LOG_ERR("Failed to initialize the LED library");
 	}
-
-	err = modem_configure();
-	if (err) {
-		LOG_ERR("Failed to configure the modem");
-		return 0;
-	}
-
-	if (gnss_init_and_start() != 0) {
-		LOG_ERR("Failed to initialize and start GNSS");
-		return 0;
-	}
+	LOG_DBG("LEDs initialized");
 
 	while (1) {
-		LOG_INF("modem_module running");
-		struct modem_msg_data msg = {0};
+		LOG_INF("Waiting for event!");
         err = k_msgq_get(&msgq_modem, &msg, K_FOREVER);
 		if (err) {
             LOG_ERR("Failed to get event from message queue: %d", err);
             /* Handle the error */
         } else {
+			LOG_INF("Got event!");
 			switch (state)
 			{
 			case STATE_DISCONNECTED:
@@ -353,7 +375,6 @@ int module_thread_fn(void)
 				break;
 			}
 		}
-		// k_sleep(K_SECONDS(20));
 	}
 
 	return 0;
