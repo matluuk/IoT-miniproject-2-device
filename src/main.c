@@ -12,13 +12,15 @@
 #include <modem/lte_lc.h>
 #include <nrf_modem_gnss.h>
 
-
 #include <app_event_manager.h>
 #include <app_event_manager_profiler_tracer.h>
 
-#include <events/app_module_event.h>
+#define MODULE app_module
+
+#include "events/app_module_event.h"
 #include "events/cloud_module_event.h"
 #include "events/modem_module_event.h"
+#include "events/location_module_event.h"
 
 /* Application module super states. */
 static enum state_type {
@@ -41,21 +43,45 @@ static enum sub_state_type {
 	SUB_STATE_PASSIVE_MODE,
 } sub_state;
 
-#define MODULE app_module
-
-LOG_MODULE_REGISTER(MODULE, LOG_LEVEL_DBG);
+struct app_cfg{
+	/**Device id for identifying the device*/
+	int device_id;
+	/**Device mode: Active or Passive*/
+	bool active_mode;
+	/**Location search timeout*/
+	int location_timeout;
+	/**Delay between location search in active mode*/
+	int active_wait_timeout;
+	/**Delay between location search in passive mode*/
+	int passive_wait_timeout;
+};
+struct app_cfg app_cfg = {
+	.device_id = 0,
+	.active_mode = true,
+	.location_timeout = 300,
+	.active_wait_timeout = 30,
+	.passive_wait_timeout = 3600
+};
 
 struct app_msg_data {
 	union {
 		struct app_module_event app;
 		struct cloud_module_event cloud;
 		struct modem_module_event modem;
+		struct location_module_event location;
 	} module;
 };
+
+static void data_sample_timer_handler(struct k_timer *timer_id);
 
 #define MSG_Q_SIZE 20
 
 K_MSGQ_DEFINE(msgq_app, sizeof(struct app_msg_data), MSG_Q_SIZE, 4);
+
+LOG_MODULE_REGISTER(MODULE, LOG_LEVEL_DBG);
+
+/* Data sample timer used in ative mode*/
+K_TIMER_DEFINE(data_sample_timer, data_sample_timer_handler, NULL);
 
 static char *sub_state_to_string(enum sub_state_type sub_state)
 {
@@ -109,6 +135,18 @@ static void set_sub_state(enum sub_state_type new_sub_state)
 	sub_state = new_sub_state;
 }
 
+static void set_passive_mode_timer(void)
+{
+	LOG_INF("Setting passive mode timer");
+	k_timer_start(&data_sample_timer, K_SECONDS(app_cfg.passive_wait_timeout), K_SECONDS(app_cfg.passive_wait_timeout));
+}
+
+static void set_active_mode_timer(void)
+{
+	LOG_INF("Setting active mode timer");
+	k_timer_start(&data_sample_timer, K_SECONDS(app_cfg.active_wait_timeout), K_SECONDS(app_cfg.active_wait_timeout));
+}
+
 static bool app_event_handler(const struct app_event_header *aeh){
 	LOG_INF("App event handler");
 	bool consume = false, enqueue_msg = false;
@@ -124,11 +162,16 @@ static bool app_event_handler(const struct app_event_header *aeh){
 		msg.module.cloud = *event;
 		enqueue_msg = true;
 	}
-
 	
 	if (is_modem_module_event(aeh)){
 		struct modem_module_event *event = cast_modem_module_event(aeh);
 		msg.module.modem = *event;
+		enqueue_msg = true;
+	}
+	
+	if (is_location_module_event(aeh)){
+		struct location_module_event *event = cast_location_module_event(aeh);
+		msg.module.location = *event;
 		enqueue_msg = true;
 	}
 
@@ -146,10 +189,29 @@ static bool app_event_handler(const struct app_event_header *aeh){
 	return consume;
 }
 
+static void data_sample_timer_handler(struct k_timer *timer_id)
+{
+	LOG_INF("Data sample timer expired");
+	struct app_module_event *app_module_event = new_app_module_event();
+	app_module_event->type = APP_EVENT_LOCATION_GET;
+	APP_EVENT_SUBMIT(app_module_event);
+	if (app_cfg.active_mode) {
+		set_active_mode_timer();
+	} else {
+		set_passive_mode_timer();
+	}
+}
+
 static void on_state_init(struct app_msg_data *msg)
 {
 	set_state(STATE_RUNNING);
-	set_sub_state(SUB_STATE_ACTIVE_MODE);
+	if (app_cfg.active_mode) {
+		set_sub_state(SUB_STATE_ACTIVE_MODE);
+		set_active_mode_timer();
+	} else {
+		set_sub_state(SUB_STATE_PASSIVE_MODE);
+		set_passive_mode_timer();
+	}
 }
 
 static void on_state_running(struct app_msg_data *msg)
@@ -234,3 +296,4 @@ APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE(MODULE, app_module_event);
 APP_EVENT_SUBSCRIBE(MODULE, modem_module_event);
 APP_EVENT_SUBSCRIBE(MODULE, cloud_module_event);
+APP_EVENT_SUBSCRIBE(MODULE, location_module_event);

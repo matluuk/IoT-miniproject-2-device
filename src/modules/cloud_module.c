@@ -20,6 +20,7 @@
 #include "events/app_module_event.h"
 #include "events/cloud_module_event.h"
 #include "events/modem_module_event.h"
+#include "events/location_module_event.h"
 
 #define MODULE cloud_module
 
@@ -50,7 +51,35 @@ struct cloud_msg_data {
 		struct app_module_event app;
 		struct cloud_module_event cloud;
 		struct modem_module_event modem;
+		struct location_module_event location;
 	} module;
+};
+
+struct cloud_pvt {
+	/** Longitude in degrees. */
+	double longitude;
+
+	/** Latitude in degrees. */
+	double latitude;
+
+	/** Altitude above WGS-84 ellipsoid in meters. */
+	float altitude;
+
+	/** Position accuracy (2D 1-sigma) in meters. */
+	float accuracy;
+
+	/** Horizontal speed in m/s. */
+	float speed;
+
+	/** Heading of user movement in degrees. */
+	float heading;
+};
+
+struct cloud_location_data {
+	/** PVT data*/
+	struct cloud_pvt pvt;
+	/** GNSS data timestamp. UNIX milliseconds. */
+	int64_t gnss_ts;
 };
 
 #define MSG_Q_SIZE 20
@@ -68,7 +97,7 @@ struct {
 	int active_wait_timeout;
 	/**Delay between location search in passive mode*/
 	int passive_wait_timeout;
-} app_cfg;
+} cloud_cfg;
 
 /* STEP 4.2 - Define the macros for the CoAP version and message length */
 #define APP_COAP_VERSION 1
@@ -162,6 +191,13 @@ static bool app_event_handler(const struct app_event_header *aeh){
 	if (is_modem_module_event(aeh)){
 		struct modem_module_event *event = cast_modem_module_event(aeh);
 		msg.module.modem = *event;
+		enqueue_msg = true;
+	}
+
+	
+	if (is_location_module_event(aeh)){
+		struct location_module_event *event = cast_location_module_event(aeh);
+		msg.module.location = *event;
 		enqueue_msg = true;
 	}
 
@@ -290,6 +326,66 @@ static int client_send_request(const char *resource_path, uint8_t content_type, 
 	return 0;
 }
 
+static int client_send_location_data(struct cloud_location_data *location_data)
+{
+	time_t rawtime = (time_t)(location_data->gnss_ts / 1000); // Convert milliseconds to seconds
+    struct tm *tm_info = localtime(&rawtime);
+
+    char time_str[20];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+
+	cJSON *root = cJSON_CreateObject();
+	if (root == NULL) {
+		printf("Error: cJSON_CreateObject failed\n");
+		return -1;
+	}
+
+	if (!cJSON_AddStringToObject(root, "time", time_str)) {
+		LOG_ERR("Error: cJSON_AddStringToObject failed for time\n");
+		cJSON_Delete(root);
+		return -1;
+	}
+
+	if (!cJSON_AddNumberToObject(root, "latitude", location_data->pvt.latitude)) {
+		LOG_ERR("Error: cJSON_AddNumberToObject failed for latitude\n");
+		cJSON_Delete(root);
+		return -1;
+	}
+
+	if (!cJSON_AddNumberToObject(root, "longitude", location_data->pvt.longitude)) {
+		LOG_ERR("Error: cJSON_AddNumberToObject failed for longitude\n");
+		cJSON_Delete(root);
+		return -1;
+	}
+
+	if (!cJSON_AddNumberToObject(root, "altitude", location_data->pvt.altitude)) {
+		LOG_ERR("Error: cJSON_AddNumberToObject failed for altitude\n");
+		cJSON_Delete(root);
+		return -1;
+	}
+
+	if (!cJSON_AddNumberToObject(root, "accuracy", location_data->pvt.accuracy)) {
+		LOG_ERR("Error: cJSON_AddNumberToObject failed for accuracy\n");
+		cJSON_Delete(root);
+		return -1;
+	}
+
+	LOG_INF("Sending: %s", cJSON_Print(root));
+	char *payload = cJSON_Print(root);
+	if (payload == NULL) {
+		LOG_ERR("Error: cJSON_Print failed\n");
+		cJSON_Delete(root);
+		return -1;
+	}
+
+	client_send_request(CONFIG_COAP_TX_RESOURCE, COAP_CONTENT_FORMAT_APP_JSON, payload, COAP_METHOD_POST, COAP_TYPE_NON_CON);
+
+	cJSON_Delete(root);
+	free(payload);
+
+	return 0;
+}
+
 static int client_send_post_request()
 {
 	time_t t = time(NULL);
@@ -370,28 +466,28 @@ static int handle_device_config_responce(char *device_config) {
     cJSON *passive_wait_timeout = cJSON_GetObjectItem(root, "passive_wait_timeout");
 
     if (device_id != NULL && cJSON_IsNumber(device_id)) {
-		app_cfg.device_id = device_id->valueint;
-		LOG_INF("Device ID: %d", app_cfg.device_id);
+		cloud_cfg.device_id = device_id->valueint;
+		LOG_INF("Device ID: %d", cloud_cfg.device_id);
 	}
 
 	if (active_mode != NULL && cJSON_IsNumber(active_mode)) {
-		app_cfg.active_mode = active_mode->valueint;
-		LOG_INF("Active Mode: %d", app_cfg.active_mode);
+		cloud_cfg.active_mode = active_mode->valueint;
+		LOG_INF("Active Mode: %d", cloud_cfg.active_mode);
 	}
 
 	if (location_timeout != NULL && cJSON_IsNumber(location_timeout)) {
-		app_cfg.location_timeout = location_timeout->valueint;
-		LOG_INF("Location Timeout: %d", app_cfg.location_timeout);
+		cloud_cfg.location_timeout = location_timeout->valueint;
+		LOG_INF("Location Timeout: %d", cloud_cfg.location_timeout);
 	}
 
 	if (active_wait_timeout != NULL && cJSON_IsNumber(active_wait_timeout)) {
-		app_cfg.active_wait_timeout = active_wait_timeout->valueint;
-		LOG_INF("Active Wait Timeout: %d", app_cfg.active_wait_timeout);
+		cloud_cfg.active_wait_timeout = active_wait_timeout->valueint;
+		LOG_INF("Active Wait Timeout: %d", cloud_cfg.active_wait_timeout);
 	}
 
 	if (passive_wait_timeout != NULL && cJSON_IsNumber(passive_wait_timeout)) {
-		app_cfg.passive_wait_timeout = passive_wait_timeout->valueint;
-		LOG_INF("Passive Wait Timeout: %d", app_cfg.passive_wait_timeout);
+		cloud_cfg.passive_wait_timeout = passive_wait_timeout->valueint;
+		LOG_INF("Passive Wait Timeout: %d", cloud_cfg.passive_wait_timeout);
 	}
 
 	LOG_INF("Device config updated successfully!");
@@ -512,6 +608,21 @@ static void on_sub_state_server_connected(struct cloud_msg_data *msg)
 
 	if (msg->module.cloud.type == CLOUD_EVENT_BUTTON_PRESSED) {
 		client_send_post_request();
+	}
+
+	if (msg->module.location.type == LOCATION_EVENT_GNSS_DATA_READY) {
+		struct cloud_location_data new_location_data = {
+			.gnss_ts = msg->module.location.location.timestamp
+		};
+
+		new_location_data.pvt.longitude = msg->module.location.location.pvt.longitude;
+		new_location_data.pvt.latitude = msg->module.location.location.pvt.latitude;
+		new_location_data.pvt.altitude = msg->module.location.location.pvt.altitude;
+		new_location_data.pvt.accuracy = msg->module.location.location.pvt.accuracy;
+		new_location_data.pvt.speed = msg->module.location.location.pvt.speed;
+		new_location_data.pvt.heading = msg->module.location.location.pvt.heading;
+		
+		client_send_location_data(&new_location_data);
 	}
 	
 }
@@ -643,3 +754,4 @@ APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE(MODULE, app_module_event);
 APP_EVENT_SUBSCRIBE(MODULE, modem_module_event);
 APP_EVENT_SUBSCRIBE(MODULE, cloud_module_event);
+APP_EVENT_SUBSCRIBE(MODULE, location_module_event);
