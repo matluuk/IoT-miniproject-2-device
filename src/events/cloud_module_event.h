@@ -7,6 +7,8 @@
  * @{
  */
 
+#include "codec.h"
+
 #include <app_event_manager.h>
 #include <app_event_manager_profiler_tracer.h>
 
@@ -32,6 +34,8 @@ struct cloud_module_event {
 	struct app_event_header header;
 	/** cloud module event type. */
 	enum cloud_module_event_type type;
+    /** Variable to store the app config*/
+    struct app_cfg cloud_cfg;
 };
 
 APP_EVENT_TYPE_DECLARE(cloud_module_event);

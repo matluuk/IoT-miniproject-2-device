@@ -7,6 +7,8 @@
  * @{
  */
 
+#include "codec.h"
+
 #include <app_event_manager.h>
 #include <app_event_manager_profiler_tracer.h>
 
@@ -23,6 +25,7 @@ enum app_module_event_type {
     APP_EVENT_LOCATION_GET,
     APP_EVENT_BATTERY_GET,
     APP_EVENT_CONFIG_GET,
+    APP_EVENT_CONFIG_UPDATE,
     APP_EVENT_START_MOVEMENT
 };
 
@@ -32,6 +35,8 @@ struct app_module_event {
 	struct app_event_header header;
 	/** App module event type. */
 	enum app_module_event_type type;
+    /** Variable to carry the current device config*/
+    struct app_cfg app_cfg;
 };
 
 APP_EVENT_TYPE_DECLARE(app_module_event);

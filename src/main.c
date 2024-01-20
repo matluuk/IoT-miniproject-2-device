@@ -12,6 +12,8 @@
 #include <modem/lte_lc.h>
 #include <nrf_modem_gnss.h>
 
+#include "codec.h"
+
 #include <app_event_manager.h>
 #include <app_event_manager_profiler_tracer.h>
 
@@ -43,23 +45,11 @@ static enum sub_state_type {
 	SUB_STATE_PASSIVE_MODE,
 } sub_state;
 
-struct app_cfg{
-	/**Device id for identifying the device*/
-	int device_id;
-	/**Device mode: Active or Passive*/
-	bool active_mode;
-	/**Location search timeout*/
-	int location_timeout;
-	/**Delay between location search in active mode*/
-	int active_wait_timeout;
-	/**Delay between location search in passive mode*/
-	int passive_wait_timeout;
-};
-struct app_cfg app_cfg = {
+static struct app_cfg current_cfg = {
 	.device_id = 0,
 	.active_mode = true,
 	.location_timeout = 300,
-	.active_wait_timeout = 30,
+	.active_wait_timeout = 120,
 	.passive_wait_timeout = 3600
 };
 
@@ -138,17 +128,16 @@ static void set_sub_state(enum sub_state_type new_sub_state)
 static void set_passive_mode_timer(void)
 {
 	LOG_INF("Setting passive mode timer");
-	k_timer_start(&data_sample_timer, K_SECONDS(app_cfg.passive_wait_timeout), K_SECONDS(app_cfg.passive_wait_timeout));
+	k_timer_start(&data_sample_timer, K_SECONDS(current_cfg.passive_wait_timeout), K_SECONDS(current_cfg.passive_wait_timeout));
 }
 
 static void set_active_mode_timer(void)
 {
 	LOG_INF("Setting active mode timer");
-	k_timer_start(&data_sample_timer, K_SECONDS(app_cfg.active_wait_timeout), K_SECONDS(app_cfg.active_wait_timeout));
+	k_timer_start(&data_sample_timer, K_SECONDS(current_cfg.active_wait_timeout), K_SECONDS(current_cfg.active_wait_timeout));
 }
 
 static bool app_event_handler(const struct app_event_header *aeh){
-	LOG_INF("App event handler");
 	bool consume = false, enqueue_msg = false;
 	struct app_msg_data msg = {0};
 	if (is_app_module_event(aeh)){
@@ -175,8 +164,6 @@ static bool app_event_handler(const struct app_event_header *aeh){
 		enqueue_msg = true;
 	}
 
-	// __ASSERT_NO_MSG(false);
-
 	if (enqueue_msg){
 		 /* Add the event to the message queue */
         int err = k_msgq_put(&msgq_app, &msg, K_NO_WAIT);
@@ -195,17 +182,68 @@ static void data_sample_timer_handler(struct k_timer *timer_id)
 	struct app_module_event *app_module_event = new_app_module_event();
 	app_module_event->type = APP_EVENT_LOCATION_GET;
 	APP_EVENT_SUBMIT(app_module_event);
-	if (app_cfg.active_mode) {
+	if (current_cfg.active_mode) {
 		set_active_mode_timer();
 	} else {
 		set_passive_mode_timer();
 	}
 }
 
+static void handle_new_config(struct app_cfg *new_cfg){
+	bool config_change = false;
+	if (current_cfg.active_mode != new_cfg->active_mode){
+		if (current_cfg.active_mode){
+			LOG_DBG("New Device mode: Active");
+		} else {
+			LOG_DBG("New Device mode: Passive");
+		}
+		config_change = true;
+	}
+
+	if (new_cfg->active_wait_timeout > 0){
+		if (current_cfg.active_wait_timeout != new_cfg->active_wait_timeout){
+			current_cfg.active_wait_timeout = new_cfg->active_wait_timeout;
+			LOG_DBG("New active wait timeout: %d", current_cfg.active_wait_timeout);
+			config_change = true;
+		}
+	} else {
+		LOG_WRN("New active wait timeout out of range: %d", new_cfg->active_wait_timeout);
+	}
+
+	if (new_cfg->location_timeout > 0){
+		if (current_cfg.location_timeout != new_cfg->location_timeout){
+			current_cfg.location_timeout = new_cfg->location_timeout;
+			LOG_DBG("New location timeout: %d", current_cfg.location_timeout);
+			config_change = true;
+		}
+	} else {
+		LOG_WRN("New location timeout out of range: %d", new_cfg->location_timeout);
+	}
+
+	if (new_cfg->passive_wait_timeout > 0){
+		if (current_cfg.passive_wait_timeout != new_cfg->passive_wait_timeout){
+			current_cfg.passive_wait_timeout = new_cfg->passive_wait_timeout;
+			LOG_DBG("New passive wait timeout: %d", current_cfg.passive_wait_timeout);
+			config_change = true;
+		}
+	} else {
+		LOG_WRN("New passive wait timeout out of range: %d", new_cfg->passive_wait_timeout);
+	}
+
+	if (config_change){
+		//TODO Save config to flash
+
+		struct app_module_event *app_module_event = new_app_module_event();
+		app_module_event->type = APP_EVENT_CONFIG_UPDATE;
+		app_module_event->app_cfg = current_cfg;
+		APP_EVENT_SUBMIT(app_module_event);
+	}
+}
+
 static void on_state_init(struct app_msg_data *msg)
 {
 	set_state(STATE_RUNNING);
-	if (app_cfg.active_mode) {
+	if (current_cfg.active_mode) {
 		set_sub_state(SUB_STATE_ACTIVE_MODE);
 		set_active_mode_timer();
 	} else {
@@ -215,18 +253,50 @@ static void on_state_init(struct app_msg_data *msg)
 }
 
 static void on_state_running(struct app_msg_data *msg)
-{
-	
+{	
+	// flag used to trigger data request, when connected to the cloud fpr the first time
+	static bool initial_data_request = false;
+
+	if (msg->module.cloud.type == CLOUD_EVENT_SERVER_CONNECTED && !initial_data_request){
+		struct app_module_event *app_module_event = new_app_module_event();
+		app_module_event->type = APP_EVENT_LOCATION_GET;
+		APP_EVENT_SUBMIT(app_module_event);
+
+		initial_data_request = true;
+	}
 }
 
 static void on_sub_state_active(struct app_msg_data *msg)
 {
-	
+	if (msg->module.app.type == APP_EVENT_CONFIG_UPDATE){
+		if (current_cfg.active_mode){
+			set_active_mode_timer();
+			return;
+		}
+		set_passive_mode_timer();
+		set_sub_state(SUB_STATE_PASSIVE_MODE);
+	}
 }
 
 static void on_sub_state_passive(struct app_msg_data *msg)
 {
-	
+	if (msg->module.app.type == APP_EVENT_CONFIG_UPDATE){
+		if (current_cfg.active_mode){
+			set_active_mode_timer();
+			set_sub_state(SUB_STATE_ACTIVE_MODE);
+			return;
+		}
+		set_passive_mode_timer();
+	}
+}
+
+static void on_all_states(struct app_msg_data *msg)
+{
+	if (msg->module.cloud.type == CLOUD_EVENT_CLOUD_CONFIG_RECEIVED){
+		struct app_cfg new_cfg = msg->module.cloud.cloud_cfg;
+		handle_new_config(&new_cfg);
+
+	}
 }
 
 int main(void)
@@ -246,18 +316,17 @@ int main(void)
 		LOG_INF("Application Event Manager initialized");
 		struct app_module_event *app_module_event = new_app_module_event();
 		app_module_event->type = APP_EVENT_START;
+		app_module_event->app_cfg = current_cfg;
 		APP_EVENT_SUBMIT(app_module_event);
 	}
 
 	while (1)
 	{	
-		LOG_INF("Waiting for event!");
         err = k_msgq_get(&msgq_app, &msg, K_FOREVER);
 		if (err) {
             LOG_ERR("Failed to get event from message queue: %d", err);
             /* Handle the error */
         } else {
-			LOG_INF("Got event!");
 
 			switch (state)
 			{
@@ -285,8 +354,8 @@ int main(void)
 				LOG_ERR("Unknown state");
 				break;
 			}
+			on_all_states(&msg);
 		}
-		// k_sleep(K_SECONDS(20));
 	}
 
 	return 0;

@@ -7,6 +7,8 @@ const char *get_location_module_event_type_str(enum location_module_event_type t
             return "LOCATION_EVENT_GNSS_DATA_READY";
         case LOCATION_EVENT_TIMEOUT:
             return "LOCATION_EVENT_TIMEOUT";
+        case LOCATION_EVENT_ERROR:
+            return "LOCATION_EVENT_ERROR";
         case LOCATION_EVENT_ACTIVE:
             return "LOCATION_EVENT_ACTIVE";
         case LOCATION_EVENT_INACTIVE:

@@ -18,6 +18,7 @@ extern "C" {
 enum location_module_event_type {
     LOCATION_EVENT_GNSS_DATA_READY,
     LOCATION_EVENT_TIMEOUT,
+    LOCATION_EVENT_ERROR,
     LOCATION_EVENT_ACTIVE,
     LOCATION_EVENT_INACTIVE
 };
@@ -43,10 +44,43 @@ struct location_module_pvt {
 	float heading;
 };
 
-/** Location data. */
+/** @brief Date and time (UTC). */
+struct location_module_datetime {
+	/** True if date and time are valid, false if not. */
+	bool valid;
+	/** 4-digit representation (Gregorian calendar). */
+	uint16_t year;
+	/** 1...12 */
+	uint8_t month;
+	/** 1...31 */
+	uint8_t day;
+	/** 0...23 */
+	uint8_t hour;
+	/** 0...59 */
+	uint8_t minute;
+	/** 0...59 */
+	uint8_t second;
+	/** 0...999 */
+	uint16_t ms;
+};
+
+/** Location method. */
+enum location_data_method {
+	/** LTE cellular positioning. */
+	LOCATION_DATA_METHOD_CELLULAR = 1,
+	/** Global Navigation Satellite System (GNSS). */
+	LOCATION_DATA_METHOD_GNSS,
+	/** Wi-Fi positioning. */
+	LOCATION_DATA_METHOD_WIFI,
+};
+
+/** LOCATION_DATA data. */
 struct location_module_data{
 	/** PVT data*/
     struct location_module_pvt pvt;
+
+	/** Location data mode*/
+	enum location_data_method method;
 
 	/** Number of satellites tracked. */
 	uint8_t satellites_tracked;
@@ -56,6 +90,9 @@ struct location_module_data{
 
 	/** Uptime when location was sampled. */
 	int64_t timestamp;
+
+	/**  Date and time (UTC). */
+	struct location_module_datetime datetime;
 };
 
 /** @brief Location module event. */

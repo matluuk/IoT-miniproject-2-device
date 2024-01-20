@@ -15,7 +15,10 @@
 /* Include the header file for the CoAP library */
 #include <zephyr/net/coap.h>
 
-#include "cJSON.h"
+#include "codec.h"
+
+#include <cJSON.h>
+#include <date_time.h>
 
 #include "events/app_module_event.h"
 #include "events/cloud_module_event.h"
@@ -86,18 +89,8 @@ struct cloud_location_data {
 
 K_MSGQ_DEFINE(msgq_cloud, sizeof(struct cloud_msg_data), MSG_Q_SIZE, 4);
 
-struct {
-	/**Device id for identifying the device*/
-	int device_id;
-	/**Device mode: Active or Passive*/
-	bool active_mode;
-	/**Location search timeout*/
-	int location_timeout;
-	/**Delay between location search in active mode*/
-	int active_wait_timeout;
-	/**Delay between location search in passive mode*/
-	int passive_wait_timeout;
-} cloud_cfg;
+/* Local copy of the device configuration. */
+static struct app_cfg copy_cfg;
 
 /* STEP 4.2 - Define the macros for the CoAP version and message length */
 #define APP_COAP_VERSION 1
@@ -172,7 +165,6 @@ static void set_sub_state(enum sub_state_type new_sub_state)
 }
 
 static bool app_event_handler(const struct app_event_header *aeh){
-	LOG_INF("App event handler");
 	bool consume = false, enqueue_msg = false;
 	struct cloud_msg_data msg = {0};
 	if (is_app_module_event(aeh)){
@@ -327,7 +319,14 @@ static int client_send_request(const char *resource_path, uint8_t content_type, 
 }
 
 static int client_send_location_data(struct cloud_location_data *location_data)
-{
+{	
+	int err;
+	err = date_time_uptime_to_unix_time_ms(&location_data->gnss_ts);
+	if (err) {
+		LOG_ERR("date_time_uptime_to_unix_time_ms, error: %d", err);
+		return err;
+	}
+
 	time_t rawtime = (time_t)(location_data->gnss_ts / 1000); // Convert milliseconds to seconds
     struct tm *tm_info = localtime(&rawtime);
 
@@ -369,7 +368,74 @@ static int client_send_location_data(struct cloud_location_data *location_data)
 		cJSON_Delete(root);
 		return -1;
 	}
+	char *payload = cJSON_Print(root);
+	if (payload == NULL) {
+		LOG_ERR("Error: cJSON_Print failed\n");
+		cJSON_Delete(root);
+		return -1;
+	}
 
+	LOG_INF("Sending: %s", payload);
+	client_send_request(CONFIG_COAP_TX_RESOURCE, COAP_CONTENT_FORMAT_APP_JSON, payload, COAP_METHOD_POST, COAP_TYPE_NON_CON);
+
+	cJSON_Delete(root);
+	free(payload);
+
+	return 0;
+}
+
+static int client_send_post_request()
+{	
+	int64_t gnss_ts = k_uptime_get();
+	int err;
+	err = date_time_uptime_to_unix_time_ms(&gnss_ts);
+	if (err) {
+		LOG_ERR("date_time_uptime_to_unix_time_ms, error: %d", err);
+		return err;
+	}
+	time_t t = (time_t)(gnss_ts / 1000);
+
+	// time_t t = time(NULL);
+	struct tm *tm_info = localtime(&t);
+
+	char time_str[20];
+	strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+
+	cJSON *root = cJSON_CreateObject();
+	if (root == NULL) {
+		printf("Error: cJSON_CreateObject failed\n");
+		return -1;
+	}
+
+	if (!cJSON_AddStringToObject(root, "time", time_str)) {
+		LOG_ERR("Error: cJSON_AddStringToObject failed for time\n");
+		cJSON_Delete(root);
+		return -1;
+	}
+
+	if (!cJSON_AddNumberToObject(root, "latitude", 65.132)) {
+		LOG_ERR("Error: cJSON_AddNumberToObject failed for latitude\n");
+		cJSON_Delete(root);
+		return -1;
+	}
+
+	if (!cJSON_AddNumberToObject(root, "longitude", 25.121)) {
+		LOG_ERR("Error: cJSON_AddNumberToObject failed for longitude\n");
+		cJSON_Delete(root);
+		return -1;
+	}
+
+	if (!cJSON_AddNumberToObject(root, "altitude", 123.456)) {
+		LOG_ERR("Error: cJSON_AddNumberToObject failed for longitude\n");
+		cJSON_Delete(root);
+		return -1;
+	}
+
+	if (!cJSON_AddNumberToObject(root, "accuracy", 12.345)) {
+		LOG_ERR("Error: cJSON_AddNumberToObject failed for longitude\n");
+		cJSON_Delete(root);
+		return -1;
+	}
 	LOG_INF("Sending: %s", cJSON_Print(root));
 	char *payload = cJSON_Print(root);
 	if (payload == NULL) {
@@ -384,65 +450,6 @@ static int client_send_location_data(struct cloud_location_data *location_data)
 	free(payload);
 
 	return 0;
-}
-
-static int client_send_post_request()
-{
-	time_t t = time(NULL);
-			struct tm *tm_info = localtime(&t);
-
-			char time_str[20];
-			strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
-
-			cJSON *root = cJSON_CreateObject();
-			if (root == NULL) {
-				printf("Error: cJSON_CreateObject failed\n");
-				return -1;
-			}
-
-			if (!cJSON_AddStringToObject(root, "time", time_str)) {
-				LOG_ERR("Error: cJSON_AddStringToObject failed for time\n");
-				cJSON_Delete(root);
-				return -1;
-			}
-
-			if (!cJSON_AddNumberToObject(root, "latitude", 65.132)) {
-				LOG_ERR("Error: cJSON_AddNumberToObject failed for latitude\n");
-				cJSON_Delete(root);
-				return -1;
-			}
-
-			if (!cJSON_AddNumberToObject(root, "longitude", 25.121)) {
-				LOG_ERR("Error: cJSON_AddNumberToObject failed for longitude\n");
-				cJSON_Delete(root);
-				return -1;
-			}
-
-			if (!cJSON_AddNumberToObject(root, "altitude", 123.456)) {
-				LOG_ERR("Error: cJSON_AddNumberToObject failed for longitude\n");
-				cJSON_Delete(root);
-				return -1;
-			}
-
-			if (!cJSON_AddNumberToObject(root, "accuracy", 12.345)) {
-				LOG_ERR("Error: cJSON_AddNumberToObject failed for longitude\n");
-				cJSON_Delete(root);
-				return -1;
-			}
-			LOG_INF("Sending: %s", cJSON_Print(root));
-			char *payload = cJSON_Print(root);
-			if (payload == NULL) {
-				LOG_ERR("Error: cJSON_Print failed\n");
-				cJSON_Delete(root);
-				return -1;
-			}
-
-			client_send_request(CONFIG_COAP_TX_RESOURCE, COAP_CONTENT_FORMAT_APP_JSON, payload, COAP_METHOD_POST, COAP_TYPE_NON_CON);
-
-			cJSON_Delete(root);
-			free(payload);
-
-			return 0;
 }
 
 static int client_get_device_config()
@@ -465,32 +472,38 @@ static int handle_device_config_responce(char *device_config) {
     cJSON *active_wait_timeout = cJSON_GetObjectItem(root, "active_wait_timeout");
     cJSON *passive_wait_timeout = cJSON_GetObjectItem(root, "passive_wait_timeout");
 
+	struct app_cfg new_cfg;
+
+
     if (device_id != NULL && cJSON_IsNumber(device_id)) {
-		cloud_cfg.device_id = device_id->valueint;
-		LOG_INF("Device ID: %d", cloud_cfg.device_id);
+		new_cfg.device_id = device_id->valueint;
+		// LOG_INF("New device ID: %d", new_cfg.device_id);
 	}
 
 	if (active_mode != NULL && cJSON_IsNumber(active_mode)) {
-		cloud_cfg.active_mode = active_mode->valueint;
-		LOG_INF("Active Mode: %d", cloud_cfg.active_mode);
+		new_cfg.active_mode = active_mode->valueint;
+		// LOG_INF("New active Mode: %d", new_cfg.active_mode);
 	}
 
 	if (location_timeout != NULL && cJSON_IsNumber(location_timeout)) {
-		cloud_cfg.location_timeout = location_timeout->valueint;
-		LOG_INF("Location Timeout: %d", cloud_cfg.location_timeout);
+		new_cfg.location_timeout = location_timeout->valueint;
+		// LOG_INF("New location Timeout: %d", new_cfg.location_timeout);
 	}
 
 	if (active_wait_timeout != NULL && cJSON_IsNumber(active_wait_timeout)) {
-		cloud_cfg.active_wait_timeout = active_wait_timeout->valueint;
-		LOG_INF("Active Wait Timeout: %d", cloud_cfg.active_wait_timeout);
+		new_cfg.active_wait_timeout = active_wait_timeout->valueint;
+		// LOG_INF("New Active Wait Timeout: %d", new_cfg.active_wait_timeout);
 	}
 
 	if (passive_wait_timeout != NULL && cJSON_IsNumber(passive_wait_timeout)) {
-		cloud_cfg.passive_wait_timeout = passive_wait_timeout->valueint;
-		LOG_INF("Passive Wait Timeout: %d", cloud_cfg.passive_wait_timeout);
+		new_cfg.passive_wait_timeout = passive_wait_timeout->valueint;
+		// LOG_INF("New Passive Wait Timeout: %d", new_cfg.passive_wait_timeout);
 	}
-
-	LOG_INF("Device config updated successfully!");
+	
+	struct cloud_module_event *cloud_module_event = new_cloud_module_event();
+	cloud_module_event->type = CLOUD_EVENT_CLOUD_CONFIG_RECEIVED;
+	cloud_module_event->cloud_cfg = new_cfg;
+	APP_EVENT_SUBMIT(cloud_module_event);
 
     cJSON_Delete(root);
 	return 0;
@@ -622,15 +635,27 @@ static void on_sub_state_server_connected(struct cloud_msg_data *msg)
 		new_location_data.pvt.speed = msg->module.location.location.pvt.speed;
 		new_location_data.pvt.heading = msg->module.location.location.pvt.heading;
 		
+		LOG_DBG("New_location_data:");
+		LOG_DBG("  latitude: %.06f", new_location_data.pvt.latitude);
+		LOG_DBG("  longitude: %.06f", new_location_data.pvt.longitude);
+		LOG_DBG("  accuracy: %.01f m", new_location_data.pvt.accuracy);
+		LOG_DBG("  altitude: %.01f m", new_location_data.pvt.altitude);
+		LOG_DBG("  speed: %.01f m", new_location_data.pvt.speed);
+		LOG_DBG("  heading: %.01f deg", new_location_data.pvt.heading);
+		
 		client_send_location_data(&new_location_data);
+		client_get_device_config();
 	}
 	
 }
 
-static void on_all_states(struct cloud_msg_data *msg)
-{
-	
+static void on_all_states(struct cloud_msg_data *msg){
+	if (msg->module.app.type == APP_EVENT_START ||
+		msg->module.app.type == APP_EVENT_CONFIG_UPDATE){
+		copy_cfg = msg->module.app.app_cfg;
+	}
 }
+
 
 int cloud_thread_fn(void)
 {
@@ -648,13 +673,11 @@ int cloud_thread_fn(void)
 	}
 
 	while (1) {
-		LOG_INF("Waiting for event");
         err = k_msgq_get(&msgq_cloud, &msg, K_FOREVER);
 		if (err) {
             LOG_ERR("Failed to get event from message queue: %d", err);
             /* Handle the error */
         } else {
-			LOG_INF("Got event!");
 			switch (state)
 			{
 			case STATE_LTE_INIT:

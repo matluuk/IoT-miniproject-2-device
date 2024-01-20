@@ -86,7 +86,6 @@ static void set_state(enum state_type new_state)
 }
 
 static bool app_event_handler(const struct app_event_header *aeh){
-	LOG_INF("App event handler");
 	bool consume = false, enqueue_msg = false;
 	struct modem_msg_data msg = {0};
 	if (is_app_module_event(aeh)){
@@ -358,13 +357,11 @@ int module_thread_fn(void)
 	LOG_DBG("LEDs initialized");
 
 	while (1) {
-		LOG_INF("Waiting for event!");
         err = k_msgq_get(&msgq_modem, &msg, K_FOREVER);
 		if (err) {
             LOG_ERR("Failed to get event from message queue: %d", err);
             /* Handle the error */
         } else {
-			LOG_INF("Got event!");
 			switch (state)
 			{
 			case STATE_DISCONNECTED:

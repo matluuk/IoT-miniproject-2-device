@@ -15,6 +15,8 @@ const char *get_app_module_event_type_str(enum app_module_event_type type)
             return "APP_EVENT_BATTERY_GET";
         case APP_EVENT_CONFIG_GET:
             return "APP_EVENT_CONFIG_GET";
+        case APP_EVENT_CONFIG_UPDATE:
+            return "APP_EVENT_CONFIG_UPDATE";
         case APP_EVENT_START_MOVEMENT:
             return "APP_EVENT_START_MOVEMENT";
         default:

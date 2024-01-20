@@ -46,6 +46,8 @@ static enum sub_state_type {
     SUB_STATE_SEARCHING,
 } sub_state;
 
+static struct app_cfg copy_cfg;
+
 static struct nrf_modem_gnss_pvt_data_frame pvt_data;
 
 /* Forward declarations*/
@@ -104,7 +106,6 @@ static void set_sub_state(enum sub_state_type new_sub_state)
 }
 
 static bool app_event_handler(const struct app_event_header *aeh){
-	LOG_INF("App event handler");
 	bool consume = false;
 	struct location_msg_data msg = {0};
 	if (is_app_module_event(aeh)){
@@ -172,13 +173,16 @@ static void send_pvt_data(){
         // location_module_event->location.satellites_tracked =
 		// 		event_data->location.details.gnss.satellites_tracked
         location_module_event->location.timestamp = k_uptime_get();
-
+        //TODO: add search_time
 
         APP_EVENT_SUBMIT(location_module_event);
 }
 
 static void location_event_handler(const struct location_event_data *event_data)
 {
+
+	struct location_module_event *location_module_event = new_location_module_event();
+
 	switch (event_data->id) {
 	case LOCATION_EVT_LOCATION:
 		LOG_DBG("Got location:");
@@ -204,22 +208,88 @@ static void location_event_handler(const struct location_event_data *event_data)
 		LOG_INF("  Google maps URL: https://maps.google.com/?q=%.06f,%.06f\n\n",
 			event_data->location.latitude, event_data->location.longitude);
 
-        pvt_data = event_data->location.details.gnss.pvt_data;
+		if (event_data->method == LOCATION_METHOD_GNSS) {
+			pvt_data = event_data->location.details.gnss.pvt_data;
 
-        if (event_data->location.datetime.valid) {
-            /* Date and time is in pvt_data that is set above */
-            time_set();
-        }
-        
-        send_pvt_data();
+			if (event_data->location.datetime.valid) {
+				/* Date and time is in pvt_data that is set above */
+				time_set();
+			}
+			
+			send_pvt_data();
+		} else if (event_data->method == LOCATION_METHOD_CELLULAR) {
+			struct location_module_event *location_module_event = new_location_module_event();
+
+			location_module_event->type = LOCATION_EVENT_GNSS_DATA_READY;
+			location_module_event->location.method = LOCATION_DATA_METHOD_CELLULAR;
+
+			location_module_event->location.pvt.latitude = event_data->location.latitude;
+			location_module_event->location.pvt.longitude = event_data->location.longitude;
+			location_module_event->location.pvt.accuracy = event_data->location.accuracy;
+			location_module_event->location.pvt.altitude = pvt_data.altitude;
+			location_module_event->location.pvt.speed = pvt_data.speed;
+			location_module_event->location.pvt.heading = pvt_data.heading;
+			// location_module_event->location.satellites_tracked =
+			// 		event_data->location.details.gnss.satellites_tracked
+			location_module_event->location.timestamp = k_uptime_get();
+
+			// location_module_event->location.datetime = static_cast<location_module_datetime>(event_data->locaiton.datetime);
+			
+			location_module_event->location.datetime.valid = event_data->location.datetime.valid;
+			location_module_event->location.datetime.year = event_data->location.datetime.year;
+			location_module_event->location.datetime.month = event_data->location.datetime.month;
+			location_module_event->location.datetime.day = event_data->location.datetime.day;
+			location_module_event->location.datetime.hour = event_data->location.datetime.hour;
+			location_module_event->location.datetime.minute = event_data->location.datetime.minute;
+			location_module_event->location.datetime.second = event_data->location.datetime.second;
+			location_module_event->location.datetime.ms = event_data->location.datetime.ms;
+			//TODO: search_time
+			
+			LOG_DBG("");
+			LOG_DBG("  latitude: %.06f", location_module_event->location.pvt.latitude);
+			LOG_DBG("  longitude: %.06f", location_module_event->location.pvt.longitude);
+			LOG_DBG("  accuracy: %.01f m", location_module_event->location.pvt.accuracy);
+			LOG_DBG("  altitude: %.01f m", location_module_event->location.pvt.altitude);
+			LOG_DBG("  speed: %.01f m", location_module_event->location.pvt.speed);
+			LOG_DBG("  heading: %.01f deg", location_module_event->location.pvt.heading);
+
+			if (location_module_event->location.datetime.valid) {
+				LOG_DBG("  date: %04d-%02d-%02d",
+					location_module_event->location.datetime.year,
+					location_module_event->location.datetime.month,
+					location_module_event->location.datetime.day);
+				LOG_DBG("  time: %02d:%02d:%02d.%03d UTC",
+					location_module_event->location.datetime.hour,
+					location_module_event->location.datetime.minute,
+					location_module_event->location.datetime.second,
+					location_module_event->location.datetime.ms);
+			}
+
+
+			APP_EVENT_SUBMIT(location_module_event);
+		}
+        location_module_event->type = LOCATION_EVENT_INACTIVE;
+        APP_EVENT_SUBMIT(location_module_event);
 		break;
 
 	case LOCATION_EVT_TIMEOUT:
 		LOG_INF("Getting location timed out\n\n");
+		
+        location_module_event->type = LOCATION_EVENT_TIMEOUT;
+        APP_EVENT_SUBMIT(location_module_event);
+
+        location_module_event->type = LOCATION_EVENT_INACTIVE;
+        APP_EVENT_SUBMIT(location_module_event);
 		break;
 
 	case LOCATION_EVT_ERROR:
 		LOG_ERR("Getting location failed\n\n");
+		
+        location_module_event->type = LOCATION_EVENT_ERROR;
+        APP_EVENT_SUBMIT(location_module_event);
+
+        location_module_event->type = LOCATION_EVENT_INACTIVE;
+        APP_EVENT_SUBMIT(location_module_event);
 		break;
 
 	case LOCATION_EVT_GNSS_ASSISTANCE_REQUEST:
@@ -235,7 +305,7 @@ static void location_event_handler(const struct location_event_data *event_data)
 		break;
 	}
 
-	k_sem_give(&location_event);
+	// k_sem_give(&location_event);
 }
 
 static void location_event_wait(void)
@@ -243,205 +313,83 @@ static void location_event_wait(void)
 	k_sem_take(&location_event, K_FOREVER);
 }
 
-/**
- * @brief Retrieve location so that fallback is applied.
- *
- * @details This is achieved by setting GNSS as first priority method and giving it too short
- * timeout. Then a fallback to next method, which is cellular in this example, occurs.
- */
-static void location_with_fallback_get(void)
-{
-	int err;
-	struct location_config config;
-	enum location_method methods[] = {LOCATION_METHOD_GNSS, LOCATION_METHOD_CELLULAR};
+// /**
+//  * @brief Retrieve location so that fallback is applied.
+//  *
+//  * @details This is achieved by setting GNSS as first priority method and giving it too short
+//  * timeout. Then a fallback to next method, which is cellular in this example, occurs.
+//  */
+// static void location_with_fallback_get(void)
+// {
+// 	int err;
+// 	struct location_config config;
+// 	enum location_method methods[] = {LOCATION_METHOD_GNSS, LOCATION_METHOD_CELLULAR};
 
-	location_config_defaults_set(&config, ARRAY_SIZE(methods), methods);
-	/* GNSS timeout is set to 1 second to force a failure. */
-	config.methods[0].gnss.timeout = 1 * MSEC_PER_SEC;
-	/* Default cellular configuration may be overridden here. */
-	config.methods[1].cellular.timeout = 40 * MSEC_PER_SEC;
+// 	location_config_defaults_set(&config, ARRAY_SIZE(methods), methods);
+// 	/* GNSS timeout is set to 1 second to force a failure. */
+// 	config.methods[0].gnss.timeout = 1 * MSEC_PER_SEC;
+// 	/* Default cellular configuration may be overridden here. */
+// 	config.methods[1].cellular.timeout = 40 * MSEC_PER_SEC;
 
-	LOG_INF("Requesting location with short GNSS timeout to trigger fallback to cellular...\n");
+// 	LOG_INF("Requesting location with short GNSS timeout to trigger fallback to cellular...\n");
 
-	err = location_request(&config);
-	if (err) {
-		LOG_ERR("Requesting location failed, error: %d\n", err);
-		return;
-	}
+// 	err = location_request(&config);
+// 	if (err) {
+// 		LOG_ERR("Requesting location failed, error: %d\n", err);
+// 		return;
+// 	}
 
-	location_event_wait();
-}
+// 	location_event_wait();
+// }
 
 /**
  * @brief Retrieve location with default configuration.
  *
  * @details This is achieved by not passing configuration at all to location_request().
  */
-static void location_default_get(void)
-{
-	int err;
-
-	LOG_INF("Requesting location with the default configuration...\n");
-
-	err = location_request(NULL);
-	if (err) {
-		LOG_ERR("Requesting location failed, error: %d\n", err);
-		return;
-	}
-
-	location_event_wait();
-}
-
-/**
- * @brief Retrieve location with GNSS low accuracy.
- */
-static void location_gnss_low_accuracy_get(void)
-{
-	int err;
-	struct location_config config;
-	enum location_method methods[] = {LOCATION_METHOD_GNSS};
-
-	location_config_defaults_set(&config, ARRAY_SIZE(methods), methods);
-	config.methods[0].gnss.accuracy = LOCATION_ACCURACY_LOW;
-
-	LOG_INF("Requesting low accuracy GNSS location...\n");
-
-	err = location_request(&config);
-	if (err) {
-		LOG_ERR("Requesting location failed, error: %d\n", err);
-		return;
-	}
-
-	location_event_wait();
-}
-
-/**
- * @brief Retrieve location with GNSS high accuracy.
- */
-static void location_gnss_high_accuracy_get(void)
-{
-	int err;
-	struct location_config config;
-	enum location_method methods[] = {LOCATION_METHOD_GNSS};
-
-	location_config_defaults_set(&config, ARRAY_SIZE(methods), methods);
-	config.methods[0].gnss.accuracy = LOCATION_ACCURACY_HIGH;
-
-	LOG_INF("Requesting high accuracy GNSS location...\n");
-
-	err = location_request(&config);
-	if (err) {
-		LOG_ERR("Requesting location failed, error: %d\n", err);
-		return;
-	}
-
-	location_event_wait();
-}
-
-#if defined(CONFIG_LOCATION_METHOD_WIFI)
-/**
- * @brief Retrieve location with Wi-Fi positioning as first priority, GNSS as second
- * and cellular as third.
- */
-static void location_wifi_get(void)
-{
-	int err;
-	struct location_config config;
-	enum location_method methods[] = {
-		LOCATION_METHOD_WIFI,
-		LOCATION_METHOD_GNSS,
-		LOCATION_METHOD_CELLULAR};
-
-	location_config_defaults_set(&config, ARRAY_SIZE(methods), methods);
-
-	LOG_INF("Requesting Wi-Fi location with GNSS and cellular fallback...\n");
-
-	err = location_request(&config);
-	if (err) {
-		LOG_INF("Requesting location failed, error: %d\n", err);
-		return;
-	}
-
-	location_event_wait();
-}
-#endif
-
-/**
- * @brief Retrieve location periodically with GNSS as first priority and cellular as second.
- */
-static void location_gnss_periodic_get(void)
+static void start_location_search(void)
 {
 	int err;
 	struct location_config config;
 	enum location_method methods[] = {LOCATION_METHOD_GNSS, LOCATION_METHOD_CELLULAR};
+	/**/
 
 	location_config_defaults_set(&config, ARRAY_SIZE(methods), methods);
-	config.interval = 30;
+	
+	config.timeout = copy_cfg.location_timeout * MSEC_PER_SEC;
 
-	LOG_INF("Requesting 30s periodic GNSS location with cellular fallback...\n");
+	LOG_INF("Requesting location with the default configuration...\n");
 
 	err = location_request(&config);
 	if (err) {
 		LOG_ERR("Requesting location failed, error: %d\n", err);
 		return;
 	}
+
+	struct location_module_event *location_module_event = new_location_module_event();
+	location_module_event->type = LOCATION_EVENT_ACTIVE;
+	APP_EVENT_SUBMIT(location_module_event);
 }
 
-// int main(void)
+// /**
+//  * @brief Retrieve location periodically with GNSS as first priority and cellular as second.
+//  */
+// static void location_gnss_periodic_get(void)
 // {
 // 	int err;
+// 	struct location_config config;
+// 	enum location_method methods[] = {LOCATION_METHOD_GNSS, LOCATION_METHOD_CELLULAR};
 
-// 	LOG_INF("Location sample started\n\n");
+// 	location_config_defaults_set(&config, ARRAY_SIZE(methods), methods);
+// 	config.interval = 30;
 
-// 	// err = nrf_modem_lib_init();
-// 	// if (err) {
-// 	// 	LOG_INF("Modem library initialization failed, error: %d\n", err);
-// 	// 	return err;
-// 	// }
+// 	LOG_INF("Requesting 30s periodic GNSS location with cellular fallback...\n");
 
-// 	if (IS_ENABLED(CONFIG_DATE_TIME)) {
-// 		/* Registering early for date_time event handler to avoid missing
-// 		 * the first event after LTE is connected.
-// 		 */
-// 		date_time_register_handler(date_time_evt_handler);
+// 	err = location_request(&config);
+// 	if (err) {
+// 		LOG_ERR("Requesting location failed, error: %d\n", err);
+// 		return;
 // 	}
-
-// 	/* A-GNSS/P-GPS needs to know the current time. */
-// 	if (IS_ENABLED(CONFIG_DATE_TIME)) {
-// 		LOG_INF("Waiting for current time\n");
-
-// 		/* Wait for an event from the Date Time library. */
-// 		k_sem_take(&time_update_finished, K_MINUTES(10));
-
-// 		if (!date_time_is_valid()) {
-// 			LOG_INF("Failed to get current time. Continuing anyway.\n");
-// 		}
-// 	}
-
-// 	// err = location_init(location_event_handler);
-// 	// if (err) {
-// 	// 	LOG_INF("Initializing the Location library failed, error: %d\n", err);
-// 	// 	return -1;
-// 	// }
-
-// 	/* The fallback case is run first, otherwise GNSS might get a fix even with a 1 second
-// 	 * timeout.
-// 	 */
-// 	location_with_fallback_get();
-
-// 	location_default_get();
-
-// 	location_gnss_low_accuracy_get();
-
-// 	location_gnss_high_accuracy_get();
-
-// #if defined(CONFIG_LOCATION_METHOD_WIFI)
-// 	location_wifi_get();
-// #endif
-
-// 	location_gnss_periodic_get();
-
-// 	return 0;
 // }
 
 static void on_state_init(struct location_msg_data *msg){
@@ -457,6 +405,17 @@ static void on_state_init(struct location_msg_data *msg){
             */
             date_time_register_handler(date_time_evt_handler);
         }
+        // /* A-GNSS/P-GPS needs to know the current time. */
+        // if (IS_ENABLED(CONFIG_DATE_TIME)) {
+        //     LOG_INF("Waiting for current time\n");
+
+        //     /* Wait for an event from the Date Time library. */
+        //     k_sem_take(&time_update_finished, K_MINUTES(10));
+
+        //     if (!date_time_is_valid()) {
+        //         LOG_INF("Failed to get current time. Continuing anyway.\n");
+        //     }
+        // }
         set_state(STATE_RUNNING);
         set_sub_state(SUB_STATE_IDLE);
     }
@@ -467,13 +426,30 @@ static void on_state_running(struct location_msg_data *msg){
 }
 
 static void on_sub_state_idle(struct location_msg_data *msg){
+	if (msg->module.location.type == LOCATION_EVENT_ACTIVE) {
+		set_sub_state(SUB_STATE_SEARCHING);
+	}
+
     if (msg->module.app.type == APP_EVENT_LOCATION_GET){
-        location_default_get();
+        start_location_search();
+        set_sub_state(SUB_STATE_SEARCHING);
     }
 }
 
 static void on_sub_state_searching(struct location_msg_data *msg){
+	if (msg->module.location.type == LOCATION_EVENT_INACTIVE){
+		set_sub_state(SUB_STATE_IDLE);
+	}
+	if (msg->module.app.type == APP_EVENT_LOCATION_GET){
+		LOG_INF("Location request is already active and will not be restarted");
+	}
+}
 
+static void on_all_states(struct location_msg_data *msg){
+	if (msg->module.app.type == APP_EVENT_START ||
+		msg->module.app.type == APP_EVENT_CONFIG_UPDATE){
+		copy_cfg = msg->module.app.app_cfg;
+	}
 }
 
 
@@ -499,6 +475,7 @@ static void message_handler(struct location_msg_data *msg){
         case STATE_SHUTDOWN:
             // Do nothing
             break;
+		on_all_states(msg);
     }
 
 }
