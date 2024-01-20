@@ -39,6 +39,7 @@ static enum state_type {
  *
  * Passive mode: Sensor GNSS position is acquired when movement is
  *		 detected, or after the configured movement timeout occurs.
+ *		 Movement detection is not yet implemented.
  */
 static enum sub_state_type {
 	SUB_STATE_ACTIVE_MODE,
