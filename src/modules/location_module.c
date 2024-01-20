@@ -304,35 +304,6 @@ static void location_event_handler(const struct location_event_data *event_data)
 	}
 }
 
-// /**
-//  * @brief Retrieve location so that fallback is applied.
-//  *
-//  * @details This is achieved by setting GNSS as first priority method and giving it too short
-//  * timeout. Then a fallback to next method, which is cellular in this example, occurs.
-//  */
-// static void location_with_fallback_get(void)
-// {
-// 	int err;
-// 	struct location_config config;
-// 	enum location_method methods[] = {LOCATION_METHOD_GNSS, LOCATION_METHOD_CELLULAR};
-
-// 	location_config_defaults_set(&config, ARRAY_SIZE(methods), methods);
-// 	/* GNSS timeout is set to 1 second to force a failure. */
-// 	config.methods[0].gnss.timeout = 1 * MSEC_PER_SEC;
-// 	/* Default cellular configuration may be overridden here. */
-// 	config.methods[1].cellular.timeout = 40 * MSEC_PER_SEC;
-
-// 	LOG_INF("Requesting location with short GNSS timeout to trigger fallback to cellular...\n");
-
-// 	err = location_request(&config);
-// 	if (err) {
-// 		LOG_ERR("Requesting location failed, error: %d\n", err);
-// 		return;
-// 	}
-
-// 	location_event_wait();
-// }
-
 /**
  * @brief Retrieve location with default configuration.
  *
@@ -362,27 +333,6 @@ static void start_location_search(void)
 	APP_EVENT_SUBMIT(location_module_event);
 }
 
-// /**
-//  * @brief Retrieve location periodically with GNSS as first priority and cellular as second.
-//  */
-// static void location_gnss_periodic_get(void)
-// {
-// 	int err;
-// 	struct location_config config;
-// 	enum location_method methods[] = {LOCATION_METHOD_GNSS, LOCATION_METHOD_CELLULAR};
-
-// 	location_config_defaults_set(&config, ARRAY_SIZE(methods), methods);
-// 	config.interval = 30;
-
-// 	LOG_INF("Requesting 30s periodic GNSS location with cellular fallback...\n");
-
-// 	err = location_request(&config);
-// 	if (err) {
-// 		LOG_ERR("Requesting location failed, error: %d\n", err);
-// 		return;
-// 	}
-// }
-
 static void on_state_init(struct location_msg_data *msg){
     int err;
     if (msg->module.modem.type == MODEM_EVENT_LTE_CONNECTED){
@@ -396,17 +346,6 @@ static void on_state_init(struct location_msg_data *msg){
             */
             date_time_register_handler(date_time_evt_handler);
         }
-        // /* A-GNSS/P-GPS needs to know the current time. */
-        // if (IS_ENABLED(CONFIG_DATE_TIME)) {
-        //     LOG_INF("Waiting for current time\n");
-
-        //     /* Wait for an event from the Date Time library. */
-        //     k_sem_take(&time_update_finished, K_MINUTES(10));
-
-        //     if (!date_time_is_valid()) {
-        //         LOG_INF("Failed to get current time. Continuing anyway.\n");
-        //     }
-        // }
         set_state(STATE_RUNNING);
         set_sub_state(SUB_STATE_IDLE);
     }
