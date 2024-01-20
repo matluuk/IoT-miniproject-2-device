@@ -18,8 +18,6 @@
 #include "events/modem_module_event.h"
 #include "events/location_module_event.h"
 
-static K_SEM_DEFINE(location_event, 0, 1);
-
 static K_SEM_DEFINE(time_update_finished, 0, 1);
 
 #define MODULE location_module
@@ -304,13 +302,6 @@ static void location_event_handler(const struct location_event_data *event_data)
 		LOG_ERR("Getting location: Unknown event\n\n");
 		break;
 	}
-
-	// k_sem_give(&location_event);
-}
-
-static void location_event_wait(void)
-{
-	k_sem_take(&location_event, K_FOREVER);
 }
 
 // /**
