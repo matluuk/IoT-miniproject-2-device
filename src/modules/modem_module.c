@@ -25,7 +25,6 @@
 static enum state_type {
 	STATE_DISCONNECTED,
 	STATE_CONNECTED,
-	STATE_CONNECTING,
 	STATE_SHUTDOWN,
 } state;
 
@@ -64,8 +63,6 @@ static char *state_to_string(enum state_type state)
 		return "STATE_DISCONNECTED";
 	case STATE_CONNECTED:
 		return "STATE_CONNECTED";
-	case STATE_CONNECTING:
-		return "STATE_CONNECTING";
 	case STATE_SHUTDOWN:
 		return "STATE_SHUTDOWN";
 	default:
@@ -312,7 +309,6 @@ static void on_state_disconnected(struct modem_msg_data *msg)
 		if (err) {
 			LOG_ERR("Failed to configure the modem");
 		}
-		// set_state(STATE_CONNECTING);
 	}
 
 	if (msg->module.modem.type == MODEM_EVENT_LTE_CONNECTED) {
@@ -322,17 +318,6 @@ static void on_state_disconnected(struct modem_msg_data *msg)
 		// 	LOG_ERR("Failed to initialize and start GNSS");
 		// }
 	}
-}
-
-static void on_state_connecting(struct modem_msg_data *msg)
-{
-	// if (msg->module.modem.type == MODEM_EVENT_LTE_CONNECTED) {
-	// 	set_state(STATE_CONNECTED);
-
-	// 	if (gnss_init_and_start() != 0) {
-	// 		LOG_ERR("Failed to initialize and start GNSS");
-	// 	}
-	// }
 }
 
 static void on_state_connected(struct modem_msg_data *msg)
@@ -367,9 +352,6 @@ int module_thread_fn(void)
 			case STATE_DISCONNECTED:
 				on_state_disconnected(&msg);
 				break;
-			case STATE_CONNECTING:
-				break;
-				on_state_connecting(&msg);
 			case STATE_CONNECTED:
 				on_state_connected(&msg);
 				break;
