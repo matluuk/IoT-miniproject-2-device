@@ -41,15 +41,6 @@ struct modem_msg_data {
 
 K_MSGQ_DEFINE(msgq_modem, sizeof(struct modem_msg_data), MSG_Q_SIZE, 4);
 
-// static struct nrf_modem_gnss_pvt_data_frame pvt_data;
-
-// static int64_t gnss_start_time;
-// static bool first_fix = false;
-
-/* STEP 4.2 - Define the macros for the CoAP version and message length */
-// #define APP_COAP_VERSION 1
-// #define APP_COAP_MAX_MSG_LEN 1280
-
 static K_SEM_DEFINE(lte_connected, 0, 1);
 
 #define MODULE modem_module
@@ -205,101 +196,6 @@ static int modem_configure(void)
 	return 0;
 }
 
-// static void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
-// {
-// 	LOG_INF("Latitude:       %.06f", pvt_data->latitude);
-// 	LOG_INF("Longitude:      %.06f", pvt_data->longitude);
-// 	LOG_INF("Altitude:       %.01f m", pvt_data->altitude);
-// 	LOG_INF("Time (UTC):     %02u:%02u:%02u.%03u",
-// 	       pvt_data->datetime.hour,
-// 	       pvt_data->datetime.minute,
-// 	       pvt_data->datetime.seconds,
-// 	       pvt_data->datetime.ms);
-// }
-
-// static void gnss_event_handler(int event)
-// {
-// 	int err, num_satellites;
-
-// 	switch (event) {
-// 	case NRF_MODEM_GNSS_EVT_PVT:
-// 		num_satellites = 0;
-// 		for (int i = 0; i < 12 ; i++) {
-// 			if (pvt_data.sv[i].signal != 0) {
-// 				num_satellites++;
-// 			}
-// 		}
-// 		LOG_INF("Searching. Current satellites: %d", num_satellites);
-// 		err = nrf_modem_gnss_read(&pvt_data, sizeof(pvt_data), NRF_MODEM_GNSS_DATA_PVT);
-// 		if (err) {
-// 			LOG_ERR("nrf_modem_gnss_read failed, err %d", err);
-// 			return;
-// 		}
-// 		if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID) {
-// 			dk_set_led_on(DK_LED1);
-// 			print_fix_data(&pvt_data);
-// 			if (!first_fix) {
-// 				LOG_INF("Time to first fix: %2.1lld s", (k_uptime_get() - gnss_start_time)/1000);
-// 				first_fix = true;
-// 			}
-// 			return;
-// 		}
-// 		/* STEP 5 - Check for the flags indicating GNSS is blocked */
-// 		if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_DEADLINE_MISSED) {
-// 			LOG_INF("GNSS blocked by LTE activity");
-// 		} else if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_NOT_ENOUGH_WINDOW_TIME) {
-// 			LOG_INF("Insufficient GNSS time windows");
-// 		}
-// 		break;
-
-// 	case NRF_MODEM_GNSS_EVT_PERIODIC_WAKEUP:
-// 		LOG_INF("GNSS has woken up");
-// 		break;
-// 	case NRF_MODEM_GNSS_EVT_SLEEP_AFTER_FIX:
-// 		LOG_INF("GNSS enter sleep after fix");
-// 		break;
-// 	default:
-// 		break;
-// 	}
-// }
-
-// static int gnss_init_and_start(void)
-// {
-
-// 	/* STEP 4 - Set the modem mode to normal */
-// 	if (lte_lc_func_mode_set(LTE_LC_FUNC_MODE_NORMAL) != 0) {
-// 		LOG_ERR("Failed to activate GNSS functional mode");
-// 		return -1;
-// 	}
-
-// 	if (nrf_modem_gnss_event_handler_set(gnss_event_handler) != 0) {
-// 		LOG_ERR("Failed to set GNSS event handler");
-// 		return -1;
-// 	}
-
-// 	if (nrf_modem_gnss_fix_interval_set(CONFIG_GNSS_PERIODIC_INTERVAL) != 0) {
-// 		LOG_ERR("Failed to set GNSS fix interval");
-// 		return -1;
-// 	}
-
-// 	if (nrf_modem_gnss_fix_retry_set(CONFIG_GNSS_PERIODIC_TIMEOUT) != 0) {
-// 		LOG_ERR("Failed to set GNSS fix retry");
-// 		return -1;
-// 	}
-
-// 	LOG_INF("Starting GNSS");
-// 	if (nrf_modem_gnss_start() != 0) {
-// 		LOG_ERR("Failed to start GNSS");
-// 		return -1;
-// 	}
-
-// 	gnss_start_time = k_uptime_get();
-
-// 	LOG_INF("GNSS started");
-
-// 	return 0;
-// }
-
 static void on_state_disconnected(struct modem_msg_data *msg)
 {
 	int err;
@@ -313,10 +209,6 @@ static void on_state_disconnected(struct modem_msg_data *msg)
 
 	if (msg->module.modem.type == MODEM_EVENT_LTE_CONNECTED) {
 		set_state(STATE_CONNECTED);
-
-		// if (gnss_init_and_start() != 0) {
-		// 	LOG_ERR("Failed to initialize and start GNSS");
-		// }
 	}
 }
 
@@ -367,11 +259,6 @@ int module_thread_fn(void)
 
 	return 0;
 }
-
-// K_THREAD_DEFINE(modem_module_thread, CONFIG_MODEM_THREAD_STACK_SIZE,
-// 		module_thread_fn, NULL, NULL, NULL,
-// 		K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
-
 
 K_THREAD_DEFINE(modem_module_thread, 2048,
 		module_thread_fn, NULL, NULL, NULL,
