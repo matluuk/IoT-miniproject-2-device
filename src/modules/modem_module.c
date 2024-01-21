@@ -16,6 +16,7 @@
 
 #include "cJSON.h"
 
+#include "modules/modules_common.h"
 #include "events/app_module_event.h"
 #include "events/cloud_module_event.h"
 #include "events/modem_module_event.h"
@@ -200,21 +201,21 @@ static void on_state_disconnected(struct modem_msg_data *msg)
 {
 	int err;
 
-	if (msg->module.app.type == APP_EVENT_START) {
+	if (IS_EVENT(msg, app, APP_EVENT_START)){
 		err = modem_configure();
 		if (err) {
 			LOG_ERR("Failed to configure the modem");
 		}
 	}
 
-	if (msg->module.modem.type == MODEM_EVENT_LTE_CONNECTED) {
+	if (IS_EVENT(msg, modem, MODEM_EVENT_LTE_CONNECTED)){
 		set_state(STATE_CONNECTED);
 	}
 }
 
 static void on_state_connected(struct modem_msg_data *msg)
 {
-	if (msg->module.modem.type == MODEM_EVENT_LTE_DISCONNECTED) {
+	if (IS_EVENT(msg, modem, MODEM_EVENT_LTE_DISCONNECTED)){
 		set_state(STATE_DISCONNECTED);
 	}
 }

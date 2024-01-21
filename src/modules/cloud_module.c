@@ -20,6 +20,7 @@
 #include <cJSON.h>
 #include <date_time.h>
 
+#include "modules/modules_common.h"
 #include "events/app_module_event.h"
 #include "events/cloud_module_event.h"
 #include "events/modem_module_event.h"
@@ -27,7 +28,7 @@
 
 #define MODULE cloud_module
 
-/* Application module super states. */
+/* Cloud module super states. */
 static enum state_type {
 	STATE_LTE_INIT,
 	STATE_LTE_DISCONNECTED,
@@ -35,18 +36,10 @@ static enum state_type {
 	STATE_SHUTDOWN
 } state;
 
-/* Application sub states. The application can be in either active or passive
- * mode.
- *
- * Active mode: Sensor GNSS position is acquired at a configured
- *		interval and sent to cloud.
- *
- * Passive mode: Sensor GNSS position is acquired when movement is
- *		 detected, or after the configured movement timeout occurs.
- */
+/* Cloud module sub states*/
 static enum sub_state_type {
-	SUB_STATE_SERVER_CONNECTED,
 	SUB_STATE_SERVER_DISCONNECTED,
+	SUB_STATE_SERVER_CONNECTED,
 } sub_state;
 
 struct cloud_msg_data {
@@ -549,7 +542,7 @@ static int client_handle_response(uint8_t *buf, int received)
 		strcpy(temp_buf, "EMPTY");
 	}
 
-	/* STEP 9.4 - Log the header code, token and payload of the response */
+	/* Log the header code, token and payload of the response */
 	LOG_INF("CoAP response: Code 0x%x, Token 0x%02x%02x, Payload: %s\n",
 	       coap_header_get_code(&reply), token[1], token[0], (char *)temp_buf);
 
@@ -582,7 +575,7 @@ static void connect_cloud() {
 
 static void on_state_lte_init(struct cloud_msg_data *msg)
 {
-	if (msg->module.modem.type == MODEM_EVENT_INTIALIZED) {
+	if (IS_EVENT(msg, app, APP_EVENT_START)){
 		set_state(STATE_LTE_DISCONNECTED);
 		set_sub_state(SUB_STATE_SERVER_DISCONNECTED);
 	}
@@ -590,7 +583,7 @@ static void on_state_lte_init(struct cloud_msg_data *msg)
 
 static void on_state_lte_disconnected(struct cloud_msg_data *msg)
 {
-	if (msg->module.modem.type == MODEM_EVENT_LTE_CONNECTED) {
+	if (IS_EVENT(msg, modem, MODEM_EVENT_LTE_CONNECTED)){
 		set_state(STATE_LTE_CONNECTED);
 
 		connect_cloud();
@@ -599,7 +592,7 @@ static void on_state_lte_disconnected(struct cloud_msg_data *msg)
 
 static void on_state_lte_connected(struct cloud_msg_data *msg)
 {
-	if (msg->module.modem.type == MODEM_EVENT_LTE_DISCONNECTED) {
+	if (IS_EVENT(msg, modem, MODEM_EVENT_LTE_DISCONNECTED)){
 		set_state(STATE_LTE_DISCONNECTED);
 		set_sub_state(SUB_STATE_SERVER_DISCONNECTED);
 	}
@@ -607,7 +600,7 @@ static void on_state_lte_connected(struct cloud_msg_data *msg)
 
 static void on_sub_state_server_disconnected(struct cloud_msg_data *msg)
 {
-	if (msg->module.cloud.type == CLOUD_EVENT_SERVER_CONNECTED) {
+	if (IS_EVENT(msg, cloud, CLOUD_EVENT_SERVER_CONNECTED)){
 		set_sub_state(SUB_STATE_SERVER_CONNECTED);
 		client_get_device_config();
 	}
@@ -615,15 +608,18 @@ static void on_sub_state_server_disconnected(struct cloud_msg_data *msg)
 
 static void on_sub_state_server_connected(struct cloud_msg_data *msg)
 {
-	if (msg->module.cloud.type == CLOUD_EVENT_SERVER_DISCONNECTED) {
+	if (IS_EVENT(msg, cloud, CLOUD_EVENT_SERVER_DISCONNECTED)){
 		set_sub_state(SUB_STATE_SERVER_DISCONNECTED);
 	}
 
-	if (msg->module.cloud.type == CLOUD_EVENT_BUTTON_PRESSED) {
-		client_send_post_request();
+	if (IS_EVENT(msg, cloud, CLOUD_EVENT_BUTTON_PRESSED)){
+		// client_send_post_request();
+		struct app_module_event *app_module_event = new_app_module_event();
+		app_module_event->type = APP_EVENT_LOCATION_GET;
+		APP_EVENT_SUBMIT(app_module_event);
 	}
 
-	if (msg->module.location.type == LOCATION_EVENT_GNSS_DATA_READY) {
+	if (IS_EVENT(msg, location, LOCATION_EVENT_GNSS_DATA_READY)){
 		struct cloud_location_data new_location_data = {
 			.gnss_ts = msg->module.location.location.timestamp
 		};
@@ -650,8 +646,8 @@ static void on_sub_state_server_connected(struct cloud_msg_data *msg)
 }
 
 static void on_all_states(struct cloud_msg_data *msg){
-	if (msg->module.app.type == APP_EVENT_START ||
-		msg->module.app.type == APP_EVENT_CONFIG_UPDATE){
+	if ((IS_EVENT(msg, app, APP_EVENT_START)) || 
+		(IS_EVENT(msg, app, APP_EVENT_CONFIG_UPDATE))){
 		copy_cfg = msg->module.app.app_cfg;
 	}
 }

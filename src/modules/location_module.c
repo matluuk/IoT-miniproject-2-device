@@ -13,6 +13,7 @@
 #include <date_time.h>
 #include <nrf_modem_gnss.h>
 
+#include "modules/modules_common.h"
 #include "events/app_module_event.h"
 #include "events/cloud_module_event.h"
 #include "events/modem_module_event.h"
@@ -312,19 +313,12 @@ static void location_event_handler(const struct location_event_data *event_data)
 static void start_location_search(void)
 {
 	int err;
-	struct location_config config;
-	enum location_method methods[] = {LOCATION_METHOD_GNSS, LOCATION_METHOD_CELLULAR};
-	/**/
 
-	location_config_defaults_set(&config, ARRAY_SIZE(methods), methods);
-	
-	config.timeout = copy_cfg.location_timeout * MSEC_PER_SEC;
+	printk("Requesting location with the default configuration...\n");
 
-	LOG_INF("Requesting location with the default configuration...\n");
-
-	err = location_request(&config);
+	err = location_request(NULL);
 	if (err) {
-		LOG_ERR("Requesting location failed, error: %d\n", err);
+		printk("Requesting location failed, error: %d\n", err);
 		return;
 	}
 
@@ -333,9 +327,39 @@ static void start_location_search(void)
 	APP_EVENT_SUBMIT(location_module_event);
 }
 
+// /**
+//  * @brief Retrieve location with default configuration.
+//  *
+//  * @details This is achieved by not passing configuration at all to location_request().
+//  */
+// static void start_location_search(void)
+// {
+// 	int err;
+// 	struct location_config config;
+// 	enum location_method methods[] = {LOCATION_METHOD_GNSS, LOCATION_METHOD_CELLULAR};
+// 	/**/
+
+// 	location_config_defaults_set(&config, ARRAY_SIZE(methods), methods);
+	
+// 	config.timeout = copy_cfg.location_timeout * MSEC_PER_SEC;
+
+// 	LOG_INF("Requesting location. Timeout %ds\n", config.timeout);
+
+// 	err = location_request(&config);
+// 	if (err) {
+// 		LOG_ERR("Requesting location failed, error: %d\n", err);
+// 		return;
+// 	}
+
+// 	struct location_module_event *location_module_event = new_location_module_event();
+// 	location_module_event->type = LOCATION_EVENT_ACTIVE;
+// 	APP_EVENT_SUBMIT(location_module_event);
+// }
+
 static void on_state_init(struct location_msg_data *msg){
     int err;
-    if (msg->module.modem.type == MODEM_EVENT_LTE_CONNECTED){
+	if (IS_EVENT(msg, modem, MODEM_EVENT_LTE_CONNECTED)){
+		LOG_DBG("MODEM_EVENT_LTE_CONNECTED");
         err = location_init(location_event_handler);
         if (err) {
             LOG_ERR("Initializing the Location library failed, error: %d\n", err);
@@ -356,28 +380,33 @@ static void on_state_running(struct location_msg_data *msg){
 }
 
 static void on_sub_state_idle(struct location_msg_data *msg){
-	if (msg->module.location.type == LOCATION_EVENT_ACTIVE) {
+	if (IS_EVENT(msg, location, LOCATION_EVENT_ACTIVE)){
+		LOG_DBG("LOCATION_EVENT_ACTIVE");
 		set_sub_state(SUB_STATE_SEARCHING);
 	}
 
-    if (msg->module.app.type == APP_EVENT_LOCATION_GET){
+	if (IS_EVENT(msg, app, APP_EVENT_LOCATION_GET)){
+		LOG_DBG("APP_EVENT_LOCATION_GET");
         start_location_search();
         set_sub_state(SUB_STATE_SEARCHING);
     }
 }
 
 static void on_sub_state_searching(struct location_msg_data *msg){
-	if (msg->module.location.type == LOCATION_EVENT_INACTIVE){
+	if (IS_EVENT(msg, location, LOCATION_EVENT_INACTIVE)){
+		LOG_DBG("LOCATION_EVENT_INACTIVE");
 		set_sub_state(SUB_STATE_IDLE);
 	}
-	if (msg->module.app.type == APP_EVENT_LOCATION_GET){
+	if (IS_EVENT(msg, app, APP_EVENT_LOCATION_GET)){
+		LOG_DBG("APP_EVENT_LOCATION_GET");
 		LOG_INF("Location request is already active and will not be restarted");
 	}
 }
 
 static void on_all_states(struct location_msg_data *msg){
-	if (msg->module.app.type == APP_EVENT_START ||
-		msg->module.app.type == APP_EVENT_CONFIG_UPDATE){
+	if ((IS_EVENT(msg, app, APP_EVENT_START)) || 
+		(IS_EVENT(msg, app, APP_EVENT_CONFIG_UPDATE))){
+		LOG_DBG("APP_EVENT_START || APP_EVENT_CONFIG_UPDATE");
 		copy_cfg = msg->module.app.app_cfg;
 	}
 }

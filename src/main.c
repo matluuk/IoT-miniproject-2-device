@@ -19,6 +19,7 @@
 
 #define MODULE app_module
 
+#include "modules/modules_common.h"
 #include "events/app_module_event.h"
 #include "events/cloud_module_event.h"
 #include "events/modem_module_event.h"
@@ -128,13 +129,13 @@ static void set_sub_state(enum sub_state_type new_sub_state)
 
 static void set_passive_mode_timer(void)
 {
-	LOG_INF("Setting passive mode timer");
+	LOG_INF("Setting passive mode timer to %ds", current_cfg.passive_wait_timeout);
 	k_timer_start(&data_sample_timer, K_SECONDS(current_cfg.passive_wait_timeout), K_SECONDS(current_cfg.passive_wait_timeout));
 }
 
 static void set_active_mode_timer(void)
 {
-	LOG_INF("Setting active mode timer");
+	LOG_INF("Setting active mode timer to %ds", current_cfg.active_wait_timeout);
 	k_timer_start(&data_sample_timer, K_SECONDS(current_cfg.active_wait_timeout), K_SECONDS(current_cfg.active_wait_timeout));
 }
 
@@ -256,9 +257,9 @@ static void on_state_init(struct app_msg_data *msg)
 static void on_state_running(struct app_msg_data *msg)
 {	
 	// flag used to trigger data request, when connected to the cloud fpr the first time
-	static bool initial_data_request = false;
+	static bool initial_data_request;
 
-	if (msg->module.cloud.type == CLOUD_EVENT_SERVER_CONNECTED && !initial_data_request){
+	if (IS_EVENT(msg, cloud, CLOUD_EVENT_SERVER_CONNECTED) && !initial_data_request){
 		struct app_module_event *app_module_event = new_app_module_event();
 		app_module_event->type = APP_EVENT_LOCATION_GET;
 		APP_EVENT_SUBMIT(app_module_event);
@@ -269,7 +270,7 @@ static void on_state_running(struct app_msg_data *msg)
 
 static void on_sub_state_active(struct app_msg_data *msg)
 {
-	if (msg->module.app.type == APP_EVENT_CONFIG_UPDATE){
+	if (IS_EVENT(msg, app, APP_EVENT_CONFIG_UPDATE)){
 		if (current_cfg.active_mode){
 			set_active_mode_timer();
 			return;
@@ -281,7 +282,7 @@ static void on_sub_state_active(struct app_msg_data *msg)
 
 static void on_sub_state_passive(struct app_msg_data *msg)
 {
-	if (msg->module.app.type == APP_EVENT_CONFIG_UPDATE){
+	if (IS_EVENT(msg, app, APP_EVENT_CONFIG_UPDATE)){
 		if (current_cfg.active_mode){
 			set_active_mode_timer();
 			set_sub_state(SUB_STATE_ACTIVE_MODE);
@@ -293,10 +294,9 @@ static void on_sub_state_passive(struct app_msg_data *msg)
 
 static void on_all_states(struct app_msg_data *msg)
 {
-	if (msg->module.cloud.type == CLOUD_EVENT_CLOUD_CONFIG_RECEIVED){
+	if (IS_EVENT(msg, cloud, CLOUD_EVENT_CLOUD_CONFIG_RECEIVED)){
 		struct app_cfg new_cfg = msg->module.cloud.cloud_cfg;
 		handle_new_config(&new_cfg);
-
 	}
 }
 
