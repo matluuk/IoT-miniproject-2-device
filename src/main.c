@@ -240,6 +240,8 @@ static void handle_new_config(struct app_cfg *new_cfg){
 		app_module_event->type = APP_EVENT_CONFIG_UPDATE;
 		app_module_event->app_cfg = current_cfg;
 		APP_EVENT_SUBMIT(app_module_event);
+	} else {
+		LOG_DBG("New config is identical to old config!");
 	}
 }
 
@@ -257,8 +259,17 @@ static void on_state_init(struct app_msg_data *msg)
 
 static void on_state_running(struct app_msg_data *msg)
 {	
-	// flag used to trigger data request, when connected to the cloud fpr the first time
+	// flag used to trigger data request, when connected to the cloud for the first time
 	static bool initial_data_request;
+
+	if (IS_EVENT(msg, cloud, CLOUD_EVENT_SERVER_CONNECTED)){
+		LOG_DBG("Received CLOUD_EVENT_SERVER_CONNECTED");
+		struct app_module_event *app_module_event = new_app_module_event();
+		app_module_event->type = APP_EVENT_LOCATION_GET;
+		APP_EVENT_SUBMIT(app_module_event);
+
+		initial_data_request = true;
+	}
 
 	if (IS_EVENT(msg, cloud, CLOUD_EVENT_SERVER_CONNECTED) && !initial_data_request){
 		struct app_module_event *app_module_event = new_app_module_event();

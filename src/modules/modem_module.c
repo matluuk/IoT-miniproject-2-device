@@ -171,10 +171,10 @@ static int modem_configure(void)
 		LOG_ERR("lte_lc_psm_req, error: %d", err);
 	}
 
-	err = lte_lc_edrx_req(true);
-	if (err) {
-		LOG_ERR("lte_lc_edrx_req, error: %d", err);
-	}
+	// err = lte_lc_edrx_req(true);
+	// if (err) {
+	// 	LOG_ERR("lte_lc_edrx_req, error: %d", err);
+	// }
 
 	LOG_INF("Connecting to LTE network");
 
