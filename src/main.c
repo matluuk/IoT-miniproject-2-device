@@ -194,6 +194,7 @@ static void data_sample_timer_handler(struct k_timer *timer_id)
 static void handle_new_config(struct app_cfg *new_cfg){
 	bool config_change = false;
 	if (current_cfg.active_mode != new_cfg->active_mode){
+		current_cfg.active_mode = new_cfg->active_mode;
 		if (current_cfg.active_mode){
 			LOG_DBG("New Device mode: Active");
 		} else {

@@ -6,8 +6,6 @@ This projects is built on top of Nordic semiconductor's course: [link](https://a
 The nordic semiconductor example application asset_tracker_v2 is used asa inspiration especially for application design and event handling.
 
 # TODO:
-- Fix config active/passive mode
-
 Location
 - Only time, latitude, longitude, altitude and accuracy is sent to cloud - Add method, search_time, satellites_tracked, location method, speed and heading.
 
