@@ -28,11 +28,11 @@ config COAP_SERVER_PORT
 	int "CoAP server port"
 	default 5683
 
-config COAP_TX_RESOURCE
+config COAP_DATA_RESOURCE
 	string "CoAP resource - this is the TX channel of the board"
 	default "large-update"
 
-config COAP_RX_RESOURCE
+config COAP_DEVICE_CONFIG_RESOURCE
 	string "CoAP resource - this is the RX channel of the board"
 	default "validate"
 

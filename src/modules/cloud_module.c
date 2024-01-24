@@ -373,7 +373,7 @@ static int client_send_location_data(struct cloud_location_data *location_data)
 	}
 
 	LOG_INF("Sending: %s", payload);
-	client_send_request(CONFIG_COAP_TX_RESOURCE, COAP_CONTENT_FORMAT_APP_JSON, payload, COAP_METHOD_POST, COAP_TYPE_NON_CON);
+	client_send_request(CONFIG_COAP_DATA_RESOURCE, COAP_CONTENT_FORMAT_APP_JSON, payload, COAP_METHOD_POST, COAP_TYPE_NON_CON);
 
 	cJSON_Delete(root);
 	free(payload);
@@ -441,7 +441,7 @@ static int client_send_post_request()
 		return -1;
 	}
 
-	client_send_request(CONFIG_COAP_TX_RESOURCE, COAP_CONTENT_FORMAT_APP_JSON, payload, COAP_METHOD_POST, COAP_TYPE_NON_CON);
+	client_send_request(CONFIG_COAP_DATA_RESOURCE, COAP_CONTENT_FORMAT_APP_JSON, payload, COAP_METHOD_POST, COAP_TYPE_NON_CON);
 
 	cJSON_Delete(root);
 	free(payload);
@@ -451,7 +451,7 @@ static int client_send_post_request()
 
 static int client_get_device_config()
 {
-	client_send_request("device_config", COAP_CONTENT_FORMAT_TEXT_PLAIN, NULL, COAP_METHOD_GET, COAP_TYPE_CON);
+	client_send_request(CONFIG_COAP_DEVICE_CONFIG_RESOURCE, COAP_CONTENT_FORMAT_TEXT_PLAIN, NULL, COAP_METHOD_GET, COAP_TYPE_CON);
 
 	return 0;
 }

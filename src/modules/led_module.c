@@ -195,13 +195,13 @@ static void on_sub_state_passive_mode(struct led_msg_data *msg){
 }
 
 static void on_sub_sub_state_location_searching(struct led_msg_data *msg){
-    if (IS_EVENT(msg, location, LOCATION_EVENT_ACTIVE)){
-        LOG_DBG("Setting led state to LED_STATE_LOCATION_SEARCHING");
-        send_led_event(LED_ID_1, &led_effect[LED_STATE_LOCATION_SEARCHING]);
+    if (IS_EVENT(msg, location, LOCATION_EVENT_INACTIVE)){
         set_sub_sub_state(SUB_SUB_STATE_LOCATION_NOT_SEARCHING);
         if (sub_state == SUB_STATE_ACTIVE_MODE){
+        	LOG_DBG("Setting led state to LED_STATE_ACTIVE_MODE");
             send_led_event(LED_ID_1, &led_effect[LED_STATE_ACTIVE_MODE]);
         } else {
+        	LOG_DBG("Setting led state to LED_STATE_PASSIVE_MODE");
             send_led_event(LED_ID_1, &led_effect[LED_STATE_PASSIVE_MODE]);
         }
 	}
@@ -213,10 +213,11 @@ static void on_sub_sub_state_location_not_searching(struct led_msg_data *msg){
 
 static void on_state_cloud_connecting(struct led_msg_data *msg){
     if (IS_EVENT(msg, cloud, CLOUD_EVENT_SERVER_CONNECTED)){
-        LOG_DBG("Setting led state to CLOUD_EVENT_SERVER_CONNECTED");
         if (sub_state == SUB_STATE_ACTIVE_MODE){
+        	LOG_DBG("Setting led state to LED_STATE_ACTIVE_MODE");
             send_led_event(LED_ID_1, &led_effect[LED_STATE_ACTIVE_MODE]);
         } else {
+        	LOG_DBG("Setting led state to LED_STATE_PASSIVE_MODE");
             send_led_event(LED_ID_1, &led_effect[LED_STATE_PASSIVE_MODE]);
         }
         set_state(STATE_RUNNING);
@@ -239,9 +240,8 @@ static void on_all_states(struct led_msg_data *msg){
         set_state(STATE_CLOUD_CONNECTING);
 	}
     if (IS_EVENT(msg, app, APP_EVENT_CONFIG_UPDATE)){
-        LOG_DBG("Setting led state to ");
+		// TODO: add led blinking for short time
         if (msg->module.app.app_cfg.active_mode){
-            send_led_event(LED_ID_1, &led_effect[LED_STATE_CLOUD_CONNECTING]);
             set_sub_state(SUB_STATE_ACTIVE_MODE);
         } else {
             set_sub_state(SUB_STATE_PASSIVE_MODE);
