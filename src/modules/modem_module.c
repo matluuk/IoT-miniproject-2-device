@@ -6,7 +6,6 @@
 #include <zephyr/random/rand32.h>
 
 #include <zephyr/logging/log.h>
-#include <dk_buttons_and_leds.h>
 #include <modem/nrf_modem_lib.h>
 #include <modem/lte_lc.h>
 #include <nrf_modem_gnss.h>
@@ -186,7 +185,6 @@ static int modem_configure(void)
 
 	k_sem_take(&lte_connected, K_FOREVER);
 	LOG_INF("Connected to LTE network");
-	dk_set_led_on(DK_LED2);
 
 	struct modem_module_event *modem_module_event = new_modem_module_event();
 
@@ -228,11 +226,6 @@ int module_thread_fn(void)
 	LOG_INF("started!");
 
 	k_sleep(K_SECONDS(3));
-
-	if (dk_leds_init() != 0) {
-		LOG_ERR("Failed to initialize the LED library");
-	}
-	LOG_DBG("LEDs initialized");
 
 	while (1) {
         err = k_msgq_get(&msgq_modem, &msg, K_FOREVER);

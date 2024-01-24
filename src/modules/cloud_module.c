@@ -308,6 +308,10 @@ static int client_send_request(const char *resource_path, uint8_t content_type, 
 
 	LOG_INF("CoAP request sent: Token 0x%04x\n", next_token);
 
+	struct cloud_module_event *cloud_module_event = new_cloud_module_event();
+	cloud_module_event->type = CLOUD_EVENT_DATA_SENT;
+	APP_EVENT_SUBMIT(cloud_module_event);
+
 	return 0;
 }
 
@@ -585,7 +589,9 @@ static void on_state_lte_disconnected(struct cloud_msg_data *msg)
 {
 	if (IS_EVENT(msg, modem, MODEM_EVENT_LTE_CONNECTED)){
 		set_state(STATE_LTE_CONNECTED);
-
+		struct cloud_module_event *cloud_module_event = new_cloud_module_event();
+		cloud_module_event->type = CLOUD_EVENT_SERVER_CONNECTING;
+		APP_EVENT_SUBMIT(cloud_module_event);
 		connect_cloud();
 	}
 }
@@ -693,8 +699,8 @@ int cloud_thread_fn(void)
 					break;
 				default:
 					break;
-				on_state_lte_connected(&msg);
 				}
+				on_state_lte_connected(&msg);
 				break;
 			case STATE_SHUTDOWN:
 				break;

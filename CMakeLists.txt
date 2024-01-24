@@ -13,6 +13,9 @@ project(cellular_fundamentals)
 target_sources(app PRIVATE src/main.c)
 # NORDIC SDK APP END
 
+# Add include directory for board specific CAF def files
+target_include_directories(app PRIVATE configuration/${BOARD}/)
+
 target_include_directories(app PRIVATE src)
 target_sources_ifdef(CONFIG_CJSON app PRIVATE src/cJSON.c)
 

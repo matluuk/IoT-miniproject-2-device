@@ -415,28 +415,27 @@ static void on_all_states(struct location_msg_data *msg){
 static void message_handler(struct location_msg_data *msg){
 
     switch (state) {
-        case STATE_INIT:
-            on_state_init(msg);
-            break;
-        case STATE_RUNNING:
-            switch (sub_state) {
-                case SUB_STATE_SEARCHING:
-                    on_sub_state_searching(msg);
-                    break;
+	case STATE_INIT:
+		on_state_init(msg);
+		break;
+	case STATE_RUNNING:
+		switch (sub_state) {
+			case SUB_STATE_SEARCHING:
+				on_sub_state_searching(msg);
+				break;
 
-                case SUB_STATE_IDLE:
-                    on_sub_state_idle(msg);
-                    break;
-            }
-            on_state_running(msg);
-            break;
+			case SUB_STATE_IDLE:
+				on_sub_state_idle(msg);
+				break;
+		}
+		on_state_running(msg);
+		break;
 
-        case STATE_SHUTDOWN:
-            // Do nothing
-            break;
-		on_all_states(msg);
+	case STATE_SHUTDOWN:
+		// Do nothing
+		break;
     }
-
+	on_all_states(msg);
 }
 
 

@@ -17,7 +17,8 @@
 #include <app_event_manager.h>
 #include <app_event_manager_profiler_tracer.h>
 
-#define MODULE app_module
+#define MODULE main
+#include <caf/events/module_state_event.h>
 
 #include "modules/modules_common.h"
 #include "events/app_module_event.h"
@@ -262,15 +263,6 @@ static void on_state_running(struct app_msg_data *msg)
 	// flag used to trigger data request, when connected to the cloud for the first time
 	static bool initial_data_request;
 
-	if (IS_EVENT(msg, cloud, CLOUD_EVENT_SERVER_CONNECTED)){
-		LOG_DBG("Received CLOUD_EVENT_SERVER_CONNECTED");
-		struct app_module_event *app_module_event = new_app_module_event();
-		app_module_event->type = APP_EVENT_LOCATION_GET;
-		APP_EVENT_SUBMIT(app_module_event);
-
-		initial_data_request = true;
-	}
-
 	if (IS_EVENT(msg, cloud, CLOUD_EVENT_SERVER_CONNECTED) && !initial_data_request){
 		struct app_module_event *app_module_event = new_app_module_event();
 		app_module_event->type = APP_EVENT_LOCATION_GET;
@@ -327,6 +319,7 @@ int main(void)
 		sys_reboot(SYS_REBOOT_COLD);
 	} else {
 		LOG_INF("Application Event Manager initialized");
+		module_set_state(MODULE_STATE_READY);
 		struct app_module_event *app_module_event = new_app_module_event();
 		app_module_event->type = APP_EVENT_START;
 		app_module_event->app_cfg = current_cfg;
@@ -357,8 +350,8 @@ int main(void)
 					break;
 				default:
 					break;
-				on_state_running(&msg);
 				}
+				on_state_running(&msg);
 				break;
 			case STATE_SHUTDOWN:
 				break;
