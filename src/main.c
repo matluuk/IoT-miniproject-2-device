@@ -1,24 +1,30 @@
-/*
- * Copyright (c) 2022 Nordic Semiconductor ASA
- *
- * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
- */
-
 #include <stdio.h>
+#include <time.h>
+
 #include <zephyr/kernel.h>
 #include <zephyr/net/socket.h>
+#include <zephyr/random/rand32.h>
 
 #include <zephyr/logging/log.h>
 #include <dk_buttons_and_leds.h>
 #include <modem/nrf_modem_lib.h>
+#include <zephyr/sys/reboot.h>
 #include <modem/lte_lc.h>
 #include <nrf_modem_gnss.h>
 
-#define SERVER_HOSTNAME "nordicecho.westeurope.cloudapp.azure.com"
-#define SERVER_PORT "2444"
+#include "codec.h"
 
-#define MESSAGE_SIZE 256
-#define MESSAGE_TO_SEND "Hello"
+#include <app_event_manager.h>
+#include <app_event_manager_profiler_tracer.h>
+
+#define MODULE main
+#include <caf/events/module_state_event.h>
+
+#include "modules/modules_common.h"
+#include "events/app_module_event.h"
+#include "events/cloud_module_event.h"
+#include "events/modem_module_event.h"
+#include "events/location_module_event.h"
 
 /* Application module super states. */
 static enum state_type {
@@ -35,40 +41,42 @@ static enum state_type {
  *
  * Passive mode: Sensor GNSS position is acquired when movement is
  *		 detected, or after the configured movement timeout occurs.
+ *		 Movement detection is not yet implemented.
  */
 static enum sub_state_type {
 	SUB_STATE_ACTIVE_MODE,
 	SUB_STATE_PASSIVE_MODE,
 } sub_state;
 
-struct {
-	/**Device mode: Active or Passive*/
-	bool active_mode;
-	/**Location search timeout*/
-	int location_timeout;
-	/**Delay between location search in active mode*/
-	int active_wait_timeout;
-	/**Delay between location search in passive mode*/
-	int passive_wait_timeout;
-} app_cfg;
+static struct app_cfg current_cfg = {
+	.device_id = 0,
+	.active_mode = true,
+	.location_timeout = 300,
+	.active_wait_timeout = 120,
+	.passive_wait_timeout = 3600
+};
 
-static struct nrf_modem_gnss_pvt_data_frame pvt_data;
+struct app_msg_data {
+	union {
+		struct app_module_event app;
+		struct cloud_module_event cloud;
+		struct modem_module_event modem;
+		struct location_module_event location;
+	} module;
+};
 
-static int64_t gnss_start_time;
-static bool first_fix = false;
+static void data_sample_timer_handler(struct k_timer *timer_id);
 
-/* STEP 3.1 - Declare buffer to send data in */
-static uint8_t gps_data[MESSAGE_SIZE];
+#define MSG_Q_SIZE 20
 
-static int sock;
-static struct sockaddr_storage server;
-static uint8_t recv_buf[MESSAGE_SIZE];
+K_MSGQ_DEFINE(msgq_app, sizeof(struct app_msg_data), MSG_Q_SIZE, 4);
 
-static K_SEM_DEFINE(lte_connected, 0, 1);
+LOG_MODULE_REGISTER(MODULE, LOG_LEVEL_DBG);
 
-LOG_MODULE_REGISTER(Lesson6_Exercise2, LOG_LEVEL_INF);
+/* Data sample timer used in ative mode*/
+K_TIMER_DEFINE(data_sample_timer, data_sample_timer_handler, NULL);
 
-string sub_state_to_string(enum sub_state_type sub_state)
+static char *sub_state_to_string(enum sub_state_type sub_state)
 {
 	switch (sub_state)
 	{
@@ -77,11 +85,11 @@ string sub_state_to_string(enum sub_state_type sub_state)
 	case SUB_STATE_PASSIVE_MODE:
 		return "SUB_STATE_PASSIVE_MODE";
 	default:
-		return "Unknown"
+		return "Unknown";
 	}
 }
 
-string state_to_string(enum state_type state)
+static char *state_to_string(enum state_type state)
 {
 	switch (state)
 	{
@@ -92,381 +100,275 @@ string state_to_string(enum state_type state)
 	case STATE_SHUTDOWN:
 		return "STATE_SHUTDOWN";
 	default:
-		return "Unknown"
+		return "Unknown";
 	}
 }
 
 static void set_state(enum state_type new_state)
 {
-	if new_state = state{
-		LOG_DBG("State: %s", state_to_string(state))
+	if (new_state == state) {
+		LOG_DBG("State: %s", state_to_string(state));
+		return;
 	}
 	LOG_DBG("State transition: %s -> %s", 
 		state_to_string(state),
-		state_to_string(new_state))
+		state_to_string(new_state));
+	state = new_state;
 }
 
 static void set_sub_state(enum sub_state_type new_sub_state)
 {
-	if new_sub_state = sub_state{
-		LOG_DBG("Sub state: %s", state_to_string(sub_state))
+	if (new_sub_state == sub_state) {
+		LOG_DBG("Sub state: %s", state_to_string(sub_state));
+		return;
 	}
 	LOG_DBG("Sub state transition: %s -> %s", 
 		sub_state_to_string(sub_state),
-		sub_state_to_string(new_sub_state))
+		sub_state_to_string(new_sub_state));
+	sub_state = new_sub_state;
 }
 
-static int server_resolve(void)
+static void set_passive_mode_timer(void)
 {
-	int err;
-	struct addrinfo *result;
-	struct addrinfo hints = {
-		.ai_family = AF_INET,
-		.ai_socktype = SOCK_DGRAM
-	};
-
-	err = getaddrinfo(SERVER_HOSTNAME, SERVER_PORT, &hints, &result);
-	if (err != 0) {
-		LOG_INF("ERROR: getaddrinfo failed %d", err);
-		return -EIO;
-	}
-
-	if (result == NULL) {
-		LOG_INF("ERROR: Address not found");
-		return -ENOENT;
-	}
-
-	struct sockaddr_in *server4 = ((struct sockaddr_in *)&server);
-
-	server4->sin_addr.s_addr =
-		((struct sockaddr_in *)result->ai_addr)->sin_addr.s_addr;
-	server4->sin_family = AF_INET;
-	server4->sin_port = ((struct sockaddr_in *)result->ai_addr)->sin_port;
-
-	char ipv4_addr[NET_IPV4_ADDR_LEN];
-	inet_ntop(AF_INET, &server4->sin_addr.s_addr, ipv4_addr,
-		  sizeof(ipv4_addr));
-	LOG_INF("IPv4 Address found %s", ipv4_addr);
-
-	freeaddrinfo(result);
-
-	return 0;
+	LOG_INF("Setting passive mode timer to %ds", current_cfg.passive_wait_timeout);
+	k_timer_start(&data_sample_timer, K_SECONDS(current_cfg.passive_wait_timeout), K_SECONDS(current_cfg.passive_wait_timeout));
 }
 
-static int server_connect(void)
+static void set_active_mode_timer(void)
 {
-	int err;
-	sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (sock < 0) {
-		LOG_ERR("Failed to create socket: %d.", errno);
-		return -errno;
-	}
-
-	err = connect(sock, (struct sockaddr *)&server,
-		      sizeof(struct sockaddr_in));
-	if (err < 0) {
-		LOG_ERR("Connect failed : %d", errno);
-		return -errno;
-	}
-	LOG_INF("Successfully connected to server");
-
-	return 0;
+	LOG_INF("Setting active mode timer to %ds", current_cfg.active_wait_timeout);
+	k_timer_start(&data_sample_timer, K_SECONDS(current_cfg.active_wait_timeout), K_SECONDS(current_cfg.active_wait_timeout));
 }
 
-static void lte_handler(const struct lte_lc_evt *const evt)
+static bool app_event_handler(const struct app_event_header *aeh){
+	bool consume = false, enqueue_msg = false;
+	struct app_msg_data msg = {0};
+	if (is_app_module_event(aeh)){
+		struct app_module_event *event = cast_app_module_event(aeh);
+		msg.module.app = *event;
+		enqueue_msg = true;
+	}
+	
+	if (is_cloud_module_event(aeh)){
+		struct cloud_module_event *event = cast_cloud_module_event(aeh);
+		msg.module.cloud = *event;
+		enqueue_msg = true;
+	}
+	
+	if (is_modem_module_event(aeh)){
+		struct modem_module_event *event = cast_modem_module_event(aeh);
+		msg.module.modem = *event;
+		enqueue_msg = true;
+	}
+	
+	if (is_location_module_event(aeh)){
+		struct location_module_event *event = cast_location_module_event(aeh);
+		msg.module.location = *event;
+		enqueue_msg = true;
+	}
+
+	if (enqueue_msg){
+		 /* Add the event to the message queue */
+        int err = k_msgq_put(&msgq_app, &msg, K_NO_WAIT);
+        if (err) {
+            LOG_ERR("Failed to add event to message queue: %d", err);
+            /* Handle the error */
+        }
+	}
+
+	return consume;
+}
+
+static void data_sample_timer_handler(struct k_timer *timer_id)
 {
-	switch (evt->type) {
-	case LTE_LC_EVT_NW_REG_STATUS:
-		if ((evt->nw_reg_status != LTE_LC_NW_REG_REGISTERED_HOME) &&
-			(evt->nw_reg_status != LTE_LC_NW_REG_REGISTERED_ROAMING)) {
-			break;
+	LOG_INF("Data sample timer expired");
+	struct app_module_event *app_module_event = new_app_module_event();
+	app_module_event->type = APP_EVENT_LOCATION_GET;
+	APP_EVENT_SUBMIT(app_module_event);
+	if (current_cfg.active_mode) {
+		set_active_mode_timer();
+	} else {
+		set_passive_mode_timer();
+	}
+}
+
+static void handle_new_config(struct app_cfg *new_cfg){
+	bool config_change = false;
+	if (current_cfg.active_mode != new_cfg->active_mode){
+		current_cfg.active_mode = new_cfg->active_mode;
+		if (current_cfg.active_mode){
+			LOG_DBG("New Device mode: Active");
+		} else {
+			LOG_DBG("New Device mode: Passive");
 		}
-		LOG_INF("Network registration status: %s",
-				evt->nw_reg_status == LTE_LC_NW_REG_REGISTERED_HOME ?
-				"Connected - home network" : "Connected - roaming");
-		k_sem_give(&lte_connected);
-		break;
-	case LTE_LC_EVT_RRC_UPDATE:
-		LOG_INF("RRC mode: %s",
-				evt->rrc_mode == LTE_LC_RRC_MODE_CONNECTED ?
-				"Connected" : "Idle");
-		break;
-	/* STEP 9.1 - On event PSM update, print PSM paramters and check if was enabled */
-	case LTE_LC_EVT_PSM_UPDATE:
-		LOG_INF("PSM parameter update: Periodic TAU: %d s, Active time: %d s",
-			evt->psm_cfg.tau, evt->psm_cfg.active_time);
-		if (evt->psm_cfg.active_time == -1){
-			LOG_ERR("Network rejected PSM parameters. Failed to enable PSM");
+		config_change = true;
+	}
+
+	if (new_cfg->active_wait_timeout > 0){
+		if (current_cfg.active_wait_timeout != new_cfg->active_wait_timeout){
+			current_cfg.active_wait_timeout = new_cfg->active_wait_timeout;
+			LOG_DBG("New active wait timeout: %d", current_cfg.active_wait_timeout);
+			config_change = true;
 		}
-		break;
-	/* STEP 9.2 - On event eDRX update, print eDRX paramters */
-	case LTE_LC_EVT_EDRX_UPDATE:
-		LOG_INF("eDRX parameter update: eDRX: %f, PTW: %f",
-			evt->edrx_cfg.edrx, evt->edrx_cfg.ptw);
-		break;
-	default:
-		break;
+	} else {
+		LOG_WRN("New active wait timeout out of range: %d", new_cfg->active_wait_timeout);
+	}
+
+	if (new_cfg->location_timeout > 0){
+		if (current_cfg.location_timeout != new_cfg->location_timeout){
+			current_cfg.location_timeout = new_cfg->location_timeout;
+			LOG_DBG("New location timeout: %d", current_cfg.location_timeout);
+			config_change = true;
+		}
+	} else {
+		LOG_WRN("New location timeout out of range: %d", new_cfg->location_timeout);
+	}
+
+	if (new_cfg->passive_wait_timeout > 0){
+		if (current_cfg.passive_wait_timeout != new_cfg->passive_wait_timeout){
+			current_cfg.passive_wait_timeout = new_cfg->passive_wait_timeout;
+			LOG_DBG("New passive wait timeout: %d", current_cfg.passive_wait_timeout);
+			config_change = true;
+		}
+	} else {
+		LOG_WRN("New passive wait timeout out of range: %d", new_cfg->passive_wait_timeout);
+	}
+
+	if (config_change){
+		//TODO Save config to flash
+
+		struct app_module_event *app_module_event = new_app_module_event();
+		app_module_event->type = APP_EVENT_CONFIG_UPDATE;
+		app_module_event->app_cfg = current_cfg;
+		APP_EVENT_SUBMIT(app_module_event);
+	} else {
+		LOG_DBG("New config is identical to old config!");
 	}
 }
 
-static int modem_configure(void)
-{
-	int err;
-
-	LOG_INF("Initializing modem library");
-
-	err = nrf_modem_lib_init();
-	if (err) {
-		LOG_ERR("Failed to initialize the modem library, error: %d", err);
-		return err;
-	}
-
-	/* STEP 8 - Request PSM and eDRX from the network */
-	err = lte_lc_psm_req(true);
-	if (err) {
-		LOG_ERR("lte_lc_psm_req, error: %d", err);
-	}
-
-	err = lte_lc_edrx_req(true);
-	if (err) {
-		LOG_ERR("lte_lc_edrx_req, error: %d", err);
-	}
-
-	LOG_INF("Connecting to LTE network");
-
-	err = lte_lc_init_and_connect_async(lte_handler);
-	if (err) {
-		LOG_ERR("Modem could not be configured, error: %d", err);
-		return err;
-	}
-
-	k_sem_take(&lte_connected, K_FOREVER);
-	LOG_INF("Connected to LTE network");
-	dk_set_led_on(DK_LED2);
-
-	return 0;
-}
-
-static void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
-{
-	LOG_INF("Latitude:       %.06f", pvt_data->latitude);
-	LOG_INF("Longitude:      %.06f", pvt_data->longitude);
-	LOG_INF("Altitude:       %.01f m", pvt_data->altitude);
-	LOG_INF("Time (UTC):     %02u:%02u:%02u.%03u",
-	       pvt_data->datetime.hour,
-	       pvt_data->datetime.minute,
-	       pvt_data->datetime.seconds,
-	       pvt_data->datetime.ms);
-
-	/* STEP 3.2 - Store latitude and longitude in gps_data buffer */
-	int err = snprintf(gps_data, MESSAGE_SIZE, "Latitude: %.06f, Longitude: %.06f", pvt_data->latitude, pvt_data->longitude);
-	if (err < 0) {
-		LOG_ERR("Failed to print to buffer: %d", err);
-	}
-}
-
-static void gnss_event_handler(int event)
-{
-	int err, num_satellites;
-
-	switch (event) {
-	case NRF_MODEM_GNSS_EVT_PVT:
-		num_satellites = 0;
-		for (int i = 0; i < 12 ; i++) {
-			if (pvt_data.sv[i].signal != 0) {
-				num_satellites++;
-			}
-		}
-		LOG_INF("Searching. Current satellites: %d", num_satellites);
-		err = nrf_modem_gnss_read(&pvt_data, sizeof(pvt_data), NRF_MODEM_GNSS_DATA_PVT);
-		if (err) {
-			LOG_ERR("nrf_modem_gnss_read failed, err %d", err);
-			return;
-		}
-		if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID) {
-			dk_set_led_on(DK_LED1);
-			print_fix_data(&pvt_data);
-			if (!first_fix) {
-				LOG_INF("Time to first fix: %2.1lld s", (k_uptime_get() - gnss_start_time)/1000);
-				first_fix = true;
-			}
-			return;
-		}
-		/* STEP 5 - Check for the flags indicating GNSS is blocked */
-		if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_DEADLINE_MISSED) {
-			LOG_INF("GNSS blocked by LTE activity");
-		} else if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_NOT_ENOUGH_WINDOW_TIME) {
-			LOG_INF("Insufficient GNSS time windows");
-		}
-		break;
-
-	case NRF_MODEM_GNSS_EVT_PERIODIC_WAKEUP:
-		LOG_INF("GNSS has woken up");
-		break;
-	case NRF_MODEM_GNSS_EVT_SLEEP_AFTER_FIX:
-		LOG_INF("GNSS enter sleep after fix");
-		break;
-	default:
-		break;
-	}
-}
-
-static int gnss_init_and_start(void)
-{
-
-	/* STEP 4 - Set the modem mode to normal */
-	if (lte_lc_func_mode_set(LTE_LC_FUNC_MODE_NORMAL) != 0) {
-		LOG_ERR("Failed to activate GNSS functional mode");
-		return -1;
-	}
-
-	if (nrf_modem_gnss_event_handler_set(gnss_event_handler) != 0) {
-		LOG_ERR("Failed to set GNSS event handler");
-		return -1;
-	}
-
-	if (nrf_modem_gnss_fix_interval_set(CONFIG_GNSS_PERIODIC_INTERVAL) != 0) {
-		LOG_ERR("Failed to set GNSS fix interval");
-		return -1;
-	}
-
-	if (nrf_modem_gnss_fix_retry_set(CONFIG_GNSS_PERIODIC_TIMEOUT) != 0) {
-		LOG_ERR("Failed to set GNSS fix retry");
-		return -1;
-	}
-
-	LOG_INF("Starting GNSS");
-	if (nrf_modem_gnss_start() != 0) {
-		LOG_ERR("Failed to start GNSS");
-		return -1;
-	}
-
-	gnss_start_time = k_uptime_get();
-
-	return 0;
-}
-
-static void button_handler(uint32_t button_state, uint32_t has_changed)
-{
-	/* STEP 3.3 - Upon button 1 push, send gps_data */
-	switch (has_changed) {
-	case DK_BTN1_MSK:
-		if (button_state & DK_BTN1_MSK){
-			int err = send(sock, &gps_data, sizeof(gps_data), 0);
-			if (err < 0) {
-				LOG_INF("Failed to send message, %d", errno);
-				return;
-			}
-		}
-		break;
-	}
-}
-
-static void on_state_init()
+static void on_state_init(struct app_msg_data *msg)
 {
 	set_state(STATE_RUNNING);
-	if (app_cfg.active_mode)
-	{
+	if (current_cfg.active_mode) {
 		set_sub_state(SUB_STATE_ACTIVE_MODE);
+		set_active_mode_timer();
+	} else {
+		set_sub_state(SUB_STATE_PASSIVE_MODE);
+		set_passive_mode_timer();
 	}
-	else
-	{
+}
+
+static void on_state_running(struct app_msg_data *msg)
+{	
+	// flag used to trigger data request, when connected to the cloud for the first time
+	static bool initial_data_request;
+
+	if (IS_EVENT(msg, cloud, CLOUD_EVENT_SERVER_CONNECTED) && !initial_data_request){
+		struct app_module_event *app_module_event = new_app_module_event();
+		app_module_event->type = APP_EVENT_LOCATION_GET;
+		APP_EVENT_SUBMIT(app_module_event);
+
+		initial_data_request = true;
+	}
+}
+
+static void on_sub_state_active(struct app_msg_data *msg)
+{
+	if (IS_EVENT(msg, app, APP_EVENT_CONFIG_UPDATE)){
+		if (current_cfg.active_mode){
+			set_active_mode_timer();
+			return;
+		}
+		set_passive_mode_timer();
 		set_sub_state(SUB_STATE_PASSIVE_MODE);
 	}
 }
 
-static void on_state_running()
+static void on_sub_state_passive(struct app_msg_data *msg)
 {
-	
+	if (IS_EVENT(msg, app, APP_EVENT_CONFIG_UPDATE)){
+		if (current_cfg.active_mode){
+			set_active_mode_timer();
+			set_sub_state(SUB_STATE_ACTIVE_MODE);
+			return;
+		}
+		set_passive_mode_timer();
+	}
 }
 
-static void on_sub_state_active()
+static void on_all_states(struct app_msg_data *msg)
 {
-	
-}
-
-static void on_sub_state_passive()
-{
-	
+	if (IS_EVENT(msg, cloud, CLOUD_EVENT_CLOUD_CONFIG_RECEIVED)){
+		struct app_cfg new_cfg = msg->module.cloud.cloud_cfg;
+		handle_new_config(&new_cfg);
+	}
 }
 
 int main(void)
-{
+{	
 	int err;
-	int received;
+	struct app_msg_data msg = {0};
 
-	if (dk_leds_init() != 0) {
-		LOG_ERR("Failed to initialize the LED library");
+	k_sleep(K_SECONDS(3));
+
+	LOG_INF("Application started");
+
+	if (app_event_manager_init()) {
+		LOG_ERR("Application Event Manager could not be initialized, rebooting...");
+		k_sleep(K_SECONDS(5));
+		sys_reboot(SYS_REBOOT_COLD);
+	} else {
+		LOG_INF("Application Event Manager initialized");
+		module_set_state(MODULE_STATE_READY);
+		struct app_module_event *app_module_event = new_app_module_event();
+		app_module_event->type = APP_EVENT_START;
+		app_module_event->app_cfg = current_cfg;
+		APP_EVENT_SUBMIT(app_module_event);
 	}
 
-	err = modem_configure();
-	if (err) {
-		LOG_ERR("Failed to configure the modem");
-		return 0;
-	}
+	while (1)
+	{	
+        err = k_msgq_get(&msgq_app, &msg, K_FOREVER);
+		if (err) {
+            LOG_ERR("Failed to get event from message queue: %d", err);
+            /* Handle the error */
+        } else {
 
-	if (dk_buttons_init(button_handler) != 0) {
-		LOG_ERR("Failed to initialize the buttons library");
-	}
-
-	if (server_resolve() != 0) {
-		LOG_INF("Failed to resolve server name");
-		return 0;
-	}
-
-	if (server_connect() != 0) {
-		LOG_INF("Failed to initialize client");
-		return 0;
-	}
-
-	if (gnss_init_and_start() != 0) {
-		LOG_ERR("Failed to initialize and start GNSS");
-		return 0;
-	}
-
-	while (1) {
-
-		switch (state)
-		{
-		case STATE_INIT:
-			on_state_init();
-			break;
-		case STATE_RUNNING:
-			switch (sub_state)
+			switch (state)
 			{
-			case SUB_STATE_ACTIVE_MODE:
-				on_sub_state_active();
+			case STATE_INIT:
+				on_state_init(&msg);
 				break;
-			case SUB_STATE_PASSIVE_MODE:
-				on_sub_state_passive();
+			case STATE_RUNNING:
+				switch (sub_state)
+				{
+				case SUB_STATE_ACTIVE_MODE:
+					on_sub_state_active(&msg);
+					break;
+				case SUB_STATE_PASSIVE_MODE:
+					on_sub_state_passive(&msg);
+					break;
+				default:
+					break;
+				}
+				on_state_running(&msg);
 				break;
+			case STATE_SHUTDOWN:
+				break;
+			
 			default:
+				LOG_ERR("Unknown state");
 				break;
-			on_state_running();
 			}
-			break;
-		case STATE_SHUTDOWN:
-			break;
-		
-		default:
-			LOG_ERR("Unknown state");
-			break;
+			on_all_states(&msg);
 		}
-		received = recv(sock, recv_buf, sizeof(recv_buf) - 1, 0);
-
-		if (received < 0) {
-			LOG_ERR("Socket error: %d, exit", errno);
-			break;
-		} else if (received == 0) {
-			break;
-		}
-
-		recv_buf[received] = 0;
-		LOG_INF("Data received from the server: (%s)", recv_buf);
-
 	}
-
-	(void)close(sock);
 
 	return 0;
 }
+
+APP_EVENT_LISTENER(MODULE, app_event_handler);
+APP_EVENT_SUBSCRIBE(MODULE, app_module_event);
+APP_EVENT_SUBSCRIBE(MODULE, modem_module_event);
+APP_EVENT_SUBSCRIBE(MODULE, cloud_module_event);
+APP_EVENT_SUBSCRIBE(MODULE, location_module_event);

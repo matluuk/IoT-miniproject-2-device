@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
 #
 
-menu "Cellfund Lesson 6 Exercise"
+menu "Iot-miniproject-2"
 
 config GNSS_PERIODIC_INTERVAL
 	int "Fix interval for periodic GPS fixes"
@@ -21,8 +21,33 @@ config GNSS_PERIODIC_TIMEOUT
 	  Fix timeout (in seconds) for periodic fixes.
 	  If set to zero, GNSS is allowed to run indefinitely until a valid PVT estimate is produced.
 
+config COAP_SERVER_IP
+	string "CoAP server ip address"
+
+config COAP_SERVER_PORT
+	int "CoAP server port"
+	default 5683
+
+config COAP_DATA_RESOURCE
+	string "CoAP resource - this is the TX channel of the board"
+	default "large-update"
+
+config COAP_DEVICE_CONFIG_RESOURCE
+	string "CoAP resource - this is the RX channel of the board"
+	default "validate"
+
+config CJSON
+	bool "Enable cJSON"
+	default n
+
+rsource "src/modules/Kconfig.modem_module"
+
 endmenu
 
 menu "Zephyr Kernel"
 source "Kconfig.zephyr"
 endmenu
+
+module = APPLICATION_MODULE
+module-str = Application module
+source "subsys/logging/Kconfig.template.log_config"
