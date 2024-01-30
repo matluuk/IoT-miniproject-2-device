@@ -231,8 +231,6 @@ static void location_event_handler(const struct location_event_data *event_data)
 			// location_module_event->location.satellites_tracked =
 			// 		event_data->location.details.gnss.satellites_tracked
 			location_module_event->location.timestamp = k_uptime_get();
-
-			// location_module_event->location.datetime = static_cast<location_module_datetime>(event_data->locaiton.datetime);
 			
 			location_module_event->location.datetime.valid = event_data->location.datetime.valid;
 			location_module_event->location.datetime.year = event_data->location.datetime.year;
@@ -327,6 +325,7 @@ static void start_location_search(void)
 	APP_EVENT_SUBMIT(location_module_event);
 }
 
+// This is a attempt to take the location search timeout from device config. Doesn't work.
 // /**
 //  * @brief Retrieve location with default configuration.
 //  *

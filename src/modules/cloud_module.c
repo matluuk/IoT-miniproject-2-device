@@ -186,8 +186,6 @@ static bool app_event_handler(const struct app_event_header *aeh){
 		enqueue_msg = true;
 	}
 
-	// __ASSERT_NO_MSG(false);
-
 	if (enqueue_msg){
 		 /* Add the event to the message queue */
         int err = k_msgq_put(&msgq_cloud, &msg, K_NO_WAIT);
@@ -406,27 +404,22 @@ static int handle_device_config_responce(char *device_config) {
 
     if (device_id != NULL && cJSON_IsNumber(device_id)) {
 		new_cfg.device_id = device_id->valueint;
-		// LOG_INF("New device ID: %d", new_cfg.device_id);
 	}
 
 	if (active_mode != NULL && cJSON_IsNumber(active_mode)) {
 		new_cfg.active_mode = active_mode->valueint;
-		// LOG_INF("New active Mode: %d", new_cfg.active_mode);
 	}
 
 	if (location_timeout != NULL && cJSON_IsNumber(location_timeout)) {
 		new_cfg.location_timeout = location_timeout->valueint;
-		// LOG_INF("New location Timeout: %d", new_cfg.location_timeout);
 	}
 
 	if (active_wait_timeout != NULL && cJSON_IsNumber(active_wait_timeout)) {
 		new_cfg.active_wait_timeout = active_wait_timeout->valueint;
-		// LOG_INF("New Active Wait Timeout: %d", new_cfg.active_wait_timeout);
 	}
 
 	if (passive_wait_timeout != NULL && cJSON_IsNumber(passive_wait_timeout)) {
 		new_cfg.passive_wait_timeout = passive_wait_timeout->valueint;
-		// LOG_INF("New Passive Wait Timeout: %d", new_cfg.passive_wait_timeout);
 	}
 	
 	struct cloud_module_event *cloud_module_event = new_cloud_module_event();
@@ -551,7 +544,6 @@ static void on_sub_state_server_connected(struct cloud_msg_data *msg)
 	}
 
 	if (IS_EVENT(msg, cloud, CLOUD_EVENT_BUTTON_PRESSED)){
-		// client_send_post_request();
 		struct app_module_event *app_module_event = new_app_module_event();
 		app_module_event->type = APP_EVENT_LOCATION_GET;
 		APP_EVENT_SUBMIT(app_module_event);
@@ -659,13 +651,9 @@ void coap_response_thread_fs(void *arg1, void *arg2, void *arg3){
 	int received;
 	int err;
 
-	// k_sleep(K_SECONDS(30));
-
     while (1) 
 	{
 		if (state == STATE_LTE_CONNECTED && sub_state == SUB_STATE_SERVER_CONNECTED) {
-
-			// LOG_DBG("Looking for CoAP data");
 
 			k_sem_take(&socket_sem, K_FOREVER); // Take the semaphore
 			

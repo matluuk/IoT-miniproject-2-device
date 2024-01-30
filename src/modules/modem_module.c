@@ -102,8 +102,6 @@ static bool app_event_handler(const struct app_event_header *aeh){
 		enqueue_msg = true;
 	}
 
-	// __ASSERT_NO_MSG(false);
-
 	if (enqueue_msg){
 		 /* Add the event to the message queue */
         int err = k_msgq_put(&msgq_modem, &msg, K_NO_WAIT);
@@ -164,7 +162,7 @@ static int modem_configure(void)
 		return err;
 	}
 
-	/* STEP 8 - Request PSM and eDRX from the network */
+	/* Request PSM and eDRX from the network */
 	err = lte_lc_psm_req(true);
 	if (err) {
 		LOG_ERR("lte_lc_psm_req, error: %d", err);
