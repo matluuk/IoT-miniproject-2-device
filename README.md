@@ -2,7 +2,7 @@
 
 This is a repository for a for Mini project 2 for Internet of Things - Universioty of Oulu course. More information about the project can be found form the projects main repository: [here](https://github.com/matluuk/IoT-miniproject-2)
 
-The repository implements a location tracker using [Thingy91](https://www.nordicsemi.com/Products/Development-hardware/Nordic-Thingy-91). 
+The repository implements a location tracker using Nordic Semiconductor nRF9160 SoC. Development board used is [Thingy91](https://www.nordicsemi.com/Products/Development-hardware/Nordic-Thingy-91).
 
 ## Features of the applicaiton
 - **Location using GNSS or Cellular.** 
@@ -41,19 +41,6 @@ The repository implements a location tracker using [Thingy91](https://www.nordic
     - **Passive mode** 
 
         Passive mode is for long location search interval. For example every 12h. Original idea was also to trigger location search, by detecting device movement during passive mode. However this functionality is not implemented.
-
-
-# Project idea
-
-The idea of this project is to develop a simple location tracker for a bike. 
-
-The device should be able to work multiple days continuosly.
-
-The Location data would be searched periodically, for example one time in a day. Additionally a accelerometer would be used to detect bike movement and trigger location search.
-
-Two device modes would be implemented. Active mode for continuous location search, and Passive mode for movement detection and 
-
-A website would be made for watching the bike location ands changing the tracker settings such as device mode and time between periodic location searchs.
 
 # inspiration for the project
 
@@ -157,7 +144,7 @@ Modem modules task is to handle teh modem and lte connection. The module intiali
 
 ### modem module events
 
-List of alöl modem module events
+List of all modem module events
 
 - MODEM_EVENT_INTIALIZED
 - MODEM_EVENT_LTE_CONNECTED
@@ -170,36 +157,34 @@ The quide to set up a development environment and build for nRF9160 Thingy91 is 
 
 Instructions of how to flash the application to the Thingy:91 can be found [here](https://academy.nordicsemi.com/flash-instructions-for-the-thingy91/).
 
-# TODO:
-Location
-- Only time, latitude, longitude, altitude and accuracy is sent to cloud - Add method, search_time, satellites_tracked, location method, speed and heading.
-- Implement location timeout. One attempt is in comments as it didn't work.
+# Future features/fixes to be developed
+
+## Location module
+- Only time, latitude, longitude, altitude and accuracy is sent to cloud - Add following information to location data: location_method, search_time, satellites_tracked, speed and heading.
+- Implement location timeout. One attempt is commented, as it didn't work.
+
+## Sensors module
+    - implement sensors module
+    - Features considered to sensors module
+        - Battery level measurement
+        - Movement detection
+        - temperature measurement
+
+## Cloud module
+- Only the most recent location data is sent to the cloud - Add queue for location data
+- Implement better way to get device config from cloud. Currently It is fetched every time data is sent.
+
+## Led module
+- Implement led sate: LED_STATE_ERROR_SYSTEM_FAULT
+- Implement led sate: LED_STATE_CLOUD_SENDING_DATA
+- Add queue for led states - This would allow predefined time for one led state
 
 ## Other
 - Move structs to codec.h
 - Take EDRx to use instead of PSM, if active wait time is smaller than a treshold value for example 10 min
-
-## Sensors module
-    - implement sensors module
-    - Battery level
-    - Movement detection
-    - temperature
-
-## Cloud
-- Only the most recent location data is sent to the cloud - Add queue for location data
-- Implement better way to get device config from cloud. Currently It is fetched every time data is sent.
-
-## LEDs
-- Implement led sate: LED_STATE_ERROR_SYSTEM_FAULT
-- Implement led sate: LED_STATE_CLOUD_SENDING_DATA
-- Add queue for led states so that time of a led state can be specified.
-
-## New features
 - Command interface between cloud and device for commands such:
     - reset device
-    - start location search
     - turn leds on/off
 
 ## Testing
-
-- Verify that location timeout is set properly
+- There are currently no tests for the applicaiton. All testing is done manually.
