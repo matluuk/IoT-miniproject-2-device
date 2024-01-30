@@ -17,7 +17,6 @@ target_sources(app PRIVATE src/main.c)
 target_include_directories(app PRIVATE configuration/${BOARD}/)
 
 target_include_directories(app PRIVATE src)
-target_sources_ifdef(CONFIG_CJSON app PRIVATE src/cJSON.c)
 
 target_sources(app PRIVATE
 		src/events/app_module_event.c

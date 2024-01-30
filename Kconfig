@@ -36,10 +36,6 @@ config COAP_DEVICE_CONFIG_RESOURCE
 	string "CoAP resource - this is the RX channel of the board"
 	default "validate"
 
-config CJSON
-	bool "Enable cJSON"
-	default n
-
 rsource "src/modules/Kconfig.modem_module"
 
 endmenu
