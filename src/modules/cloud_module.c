@@ -85,14 +85,14 @@ K_MSGQ_DEFINE(msgq_cloud, sizeof(struct cloud_msg_data), MSG_Q_SIZE, 4);
 /* Local copy of the device configuration. */
 static struct app_cfg copy_cfg;
 
-/* STEP 4.2 - Define the macros for the CoAP version and message length */
+/* Define the macros for the CoAP version and message length */
 #define APP_COAP_VERSION 1
 #define APP_COAP_MAX_MSG_LEN 1280
 
-/* STEP 5 - Declare the buffer coap_buf to receive the response. */
+/* Declare the buffer coap_buf to receive the response. */
 static uint8_t coap_buf[APP_COAP_MAX_MSG_LEN];
 
-/* STEP 6.1 - Define the CoAP message token next_token */
+/* Define the CoAP message token next_token */
 static uint16_t next_token;
 
 static int sock;
@@ -238,7 +238,7 @@ static int client_init(void)
 
 	LOG_INF("Successfully connected to server");
 
-	/* STEP 6.2 - Generate a random token after the socket is connected */
+	/* Generate a random token after the socket is connected */
 	next_token = sys_rand32_get();
 
 	return 0;
@@ -440,14 +440,14 @@ static int client_handle_response(uint8_t *buf, int received)
 	const uint8_t *payload;
 	uint16_t payload_len;
 	uint8_t temp_buf[128];
-	/* STEP 9.1 - Parse the received CoAP packet */
+	/* Parse the received CoAP packet */
 	int err = coap_packet_parse(&reply, buf, received, NULL, 0);
 	if (err < 0) {
 		LOG_ERR("Malformed response received: %d\n", err);
 		return err;
 	}
 
-	/* STEP 9.2 - Confirm the token in the response matches the token sent */
+	/* Confirm the token in the response matches the token sent */
 	token_len = coap_header_get_token(&reply, token);
 	if ((token_len != sizeof(next_token)) ||
 	    (memcmp(&next_token, token, sizeof(next_token)) != 0)) {
@@ -456,7 +456,7 @@ static int client_handle_response(uint8_t *buf, int received)
 		return 0;
 	}
 
-	/* STEP 9.3 - Retrieve the payload and confirm it's nonzero */
+	/* Retrieve the payload and confirm it's nonzero */
 	payload = coap_packet_get_payload(&reply, &payload_len);
 
 	if (payload_len > 0) {
